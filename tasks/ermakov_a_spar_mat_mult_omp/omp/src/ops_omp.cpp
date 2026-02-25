@@ -85,10 +85,13 @@ bool ErmakovASparMatMultOMP::PreProcessingImpl() {
 }
 
 bool ErmakovASparMatMultOMP::RunImpl() {
-  const int m = a_.rows;
-  const int p = b_.cols;
+  const auto &A = a_;
+  const auto &B = b_;
 
-  if (a_.cols != b_.rows) {
+  const int m = A.rows;
+  const int p = B.cols;
+
+  if (A.cols != B.rows) {
     return false;
   }
 
@@ -96,34 +99,34 @@ bool ErmakovASparMatMultOMP::RunImpl() {
   c_.col_index.clear();
   std::ranges::fill(c_.row_ptr, 0);
 
-  std::vector<std::vector<std::complex<double>>> row_values(static_cast<std::size_t>(m));
-  std::vector<std::vector<int>> row_cols(static_cast<std::size_t>(m));
-  std::vector<int> row_nnz(static_cast<std::size_t>(m), 0);
+  std::vector<std::vector<std::complex<double>>> row_values(static_cast<size_t>(m));
+  std::vector<std::vector<int>> row_cols(static_cast<size_t>(m));
 
-#pragma omp parallel
+#pragma omp parallel default(none) shared(A, B, row_values, row_cols, m, p)
   {
-    std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
-    std::vector<int> row_mark(static_cast<std::size_t>(p), -1);
+    std::vector<std::complex<double>> row_vals(static_cast<size_t>(p), std::complex<double>(0.0, 0.0));
+
+    std::vector<int> row_mark(static_cast<size_t>(p), -1);
     std::vector<int> used_cols;
     used_cols.reserve(256);
 
-#pragma omp for
+#pragma omp for schedule(static)
     for (int i = 0; i < m; ++i) {
       used_cols.clear();
 
-      const int a_start = a_.row_ptr[i];
-      const int a_end = a_.row_ptr[i + 1];
+      const int a_start = A.row_ptr[i];
+      const int a_end = A.row_ptr[i + 1];
 
       for (int ak = a_start; ak < a_end; ++ak) {
-        const int j = a_.col_index[ak];
-        const auto a_ij = a_.values[ak];
+        const int j = A.col_index[ak];
+        const auto a_ij = A.values[ak];
 
-        const int b_start = b_.row_ptr[j];
-        const int b_end = b_.row_ptr[j + 1];
+        const int b_start = B.row_ptr[j];
+        const int b_end = B.row_ptr[j + 1];
 
         for (int bk = b_start; bk < b_end; ++bk) {
-          const int k = b_.col_index[bk];
-          const auto b_jk = b_.values[bk];
+          const int k = B.col_index[bk];
+          const auto b_jk = B.values[bk];
 
           if (row_mark[k] != i) {
             row_mark[k] = i;
@@ -137,32 +140,39 @@ bool ErmakovASparMatMultOMP::RunImpl() {
 
       std::ranges::sort(used_cols);
 
+      auto &cols = row_cols[static_cast<size_t>(i)];
+      auto &vals = row_values[static_cast<size_t>(i)];
+
+      cols.reserve(used_cols.size());
+      vals.reserve(used_cols.size());
+
       for (int k : used_cols) {
         const auto v = row_vals[k];
         if (v == std::complex<double>(0.0, 0.0)) {
           continue;
         }
-        row_cols[static_cast<std::size_t>(i)].push_back(k);
-        row_values[static_cast<std::size_t>(i)].push_back(v);
-      }
 
-      row_nnz[static_cast<std::size_t>(i)] = static_cast<int>(row_values[static_cast<std::size_t>(i)].size());
+        cols.push_back(k);
+        vals.push_back(v);
+      }
     }
   }
 
-  int nnz_so_far = 0;
+  int nnz = 0;
   for (int i = 0; i < m; ++i) {
-    c_.row_ptr[i] = nnz_so_far;
-    nnz_so_far += row_nnz[static_cast<std::size_t>(i)];
+    c_.row_ptr[i] = nnz;
+    nnz += static_cast<int>(row_values[static_cast<size_t>(i)].size());
   }
-  c_.row_ptr[m] = nnz_so_far;
+  c_.row_ptr[m] = nnz;
 
-  c_.values.reserve(static_cast<std::size_t>(nnz_so_far));
-  c_.col_index.reserve(static_cast<std::size_t>(nnz_so_far));
+  c_.values.reserve(static_cast<size_t>(nnz));
+  c_.col_index.reserve(static_cast<size_t>(nnz));
 
   for (int i = 0; i < m; ++i) {
-    const auto idx = static_cast<std::size_t>(i);
+    const auto idx = static_cast<size_t>(i);
+
     c_.values.insert(c_.values.end(), row_values[idx].begin(), row_values[idx].end());
+
     c_.col_index.insert(c_.col_index.end(), row_cols[idx].begin(), row_cols[idx].end());
   }
 
