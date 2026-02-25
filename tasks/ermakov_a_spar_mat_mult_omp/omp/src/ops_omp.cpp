@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult_omp/common/include/common.hpp"
-#include "util/include/util.hpp"
 
 namespace ermakov_a_spar_mat_mult_omp {
 
@@ -84,6 +83,47 @@ bool ErmakovASparMatMultOMP::PreProcessingImpl() {
   return true;
 }
 
+void ErmakovASparMatMultOMP::ProcessRow(int i, std::vector<std::complex<double>> &row_vals, std::vector<int> &row_mark,
+                                        std::vector<int> &used_cols,
+                                        std::vector<std::vector<std::complex<double>>> &row_values,
+                                        std::vector<std::vector<int>> &row_cols) {
+  used_cols.clear();
+
+  const int a_start = a_.row_ptr[i];
+  const int a_end = a_.row_ptr[i + 1];
+
+  for (int ak = a_start; ak < a_end; ++ak) {
+    const int j = a_.col_index[ak];
+    const auto a_ij = a_.values[ak];
+
+    const int b_start = b_.row_ptr[j];
+    const int b_end = b_.row_ptr[j + 1];
+
+    for (int bk = b_start; bk < b_end; ++bk) {
+      const int k = b_.col_index[bk];
+      const auto b_jk = b_.values[bk];
+
+      if (row_mark[k] != i) {
+        row_mark[k] = i;
+        row_vals[k] = a_ij * b_jk;
+        used_cols.push_back(k);
+      } else {
+        row_vals[k] += a_ij * b_jk;
+      }
+    }
+  }
+
+  std::ranges::sort(used_cols);
+
+  for (int k : used_cols) {
+    const auto v = row_vals[k];
+    if (v != std::complex<double>(0.0, 0.0)) {
+      row_cols[static_cast<std::size_t>(i)].push_back(k);
+      row_values[static_cast<std::size_t>(i)].push_back(v);
+    }
+  }
+}
+
 bool ErmakovASparMatMultOMP::RunImpl() {
   const int m = a_.rows;
   const int p = b_.cols;
@@ -100,7 +140,7 @@ bool ErmakovASparMatMultOMP::RunImpl() {
   std::vector<std::vector<int>> row_cols(static_cast<std::size_t>(m));
   std::vector<int> row_nnz(static_cast<std::size_t>(m), 0);
 
-#pragma omp parallel
+#pragma omp parallel default(none) shared(m, p, row_values, row_cols, row_nnz)
   {
     std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
     std::vector<int> row_mark(static_cast<std::size_t>(p), -1);
@@ -109,43 +149,7 @@ bool ErmakovASparMatMultOMP::RunImpl() {
 
 #pragma omp for
     for (int i = 0; i < m; ++i) {
-      used_cols.clear();
-
-      const int a_start = a_.row_ptr[i];
-      const int a_end = a_.row_ptr[i + 1];
-
-      for (int ak = a_start; ak < a_end; ++ak) {
-        const int j = a_.col_index[ak];
-        const auto a_ij = a_.values[ak];
-
-        const int b_start = b_.row_ptr[j];
-        const int b_end = b_.row_ptr[j + 1];
-
-        for (int bk = b_start; bk < b_end; ++bk) {
-          const int k = b_.col_index[bk];
-          const auto b_jk = b_.values[bk];
-
-          if (row_mark[k] != i) {
-            row_mark[k] = i;
-            row_vals[k] = a_ij * b_jk;
-            used_cols.push_back(k);
-          } else {
-            row_vals[k] += a_ij * b_jk;
-          }
-        }
-      }
-
-      std::ranges::sort(used_cols);
-
-      for (int k : used_cols) {
-        const auto v = row_vals[k];
-        if (v == std::complex<double>(0.0, 0.0)) {
-          continue;
-        }
-        row_cols[static_cast<std::size_t>(i)].push_back(k);
-        row_values[static_cast<std::size_t>(i)].push_back(v);
-      }
-
+      ProcessRow(i, row_vals, row_mark, used_cols, row_values, row_cols);
       row_nnz[static_cast<std::size_t>(i)] = static_cast<int>(row_values[static_cast<std::size_t>(i)].size());
     }
   }
