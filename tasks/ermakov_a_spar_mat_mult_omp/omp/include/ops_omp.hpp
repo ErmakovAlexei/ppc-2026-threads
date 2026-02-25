@@ -1,5 +1,8 @@
 #pragma once
 
+#include <complex>
+#include <vector>
+
 #include "ermakov_a_spar_mat_mult_omp/common/include/common.hpp"
 #include "task/include/task.hpp"
 
