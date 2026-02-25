@@ -20,6 +20,10 @@ class ErmakovASparMatMultOMP : public BaseTask {
 
   static bool ValidateMatrix(const MatrixCRS &m);
 
+  void ProcessRow(int i, std::vector<std::complex<double>> &row_vals, std::vector<int> &row_mark,
+                  std::vector<int> &used_cols, std::vector<std::vector<std::complex<double>>> &row_values,
+                  std::vector<std::vector<int>> &row_cols);
+
   MatrixCRS a_;
   MatrixCRS b_;
   MatrixCRS c_;
