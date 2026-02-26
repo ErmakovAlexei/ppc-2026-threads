@@ -8,8 +8,7 @@
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
-class TochilinEHoarSortSimMerRunPerfTestsSEQ
-    : public ppc::util::BaseRunPerfTests<InType, OutType> {
+class TochilinEHoarSortSimMerRunPerfTestsSEQ : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
   const int kCount_ = 50000;
   InType input_data_{};
@@ -24,7 +23,7 @@ class TochilinEHoarSortSimMerRunPerfTestsSEQ
     }
   }
 
-  bool CheckTestOutputData(OutType& output_data) final {
+  bool CheckTestOutputData(OutType &output_data) final {
     return std::ranges::is_sorted(output_data);
   }
 
@@ -40,19 +39,13 @@ TEST_P(TochilinEHoarSortSimMerRunPerfTestsSEQ, RunPerfModes) {
 namespace {
 
 const auto kAllPerfTasks =
-    ppc::util::MakeAllPerfTasks<InType, TochilinEHoarSortSimMerSEQ>(
-        PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer);
+    ppc::util::MakeAllPerfTasks<InType, TochilinEHoarSortSimMerSEQ>(PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
-const auto kPerfTestName =
-    TochilinEHoarSortSimMerRunPerfTestsSEQ::CustomPerfTestName;
+const auto kPerfTestName = TochilinEHoarSortSimMerRunPerfTestsSEQ::CustomPerfTestName;
 
-INSTANTIATE_TEST_SUITE_P(
-    RunModeTests,
-    TochilinEHoarSortSimMerRunPerfTestsSEQ,
-    kGtestValues,
-    kPerfTestName);
+INSTANTIATE_TEST_SUITE_P(RunModeTests, TochilinEHoarSortSimMerRunPerfTestsSEQ, kGtestValues, kPerfTestName);
 
 }  // namespace
 
