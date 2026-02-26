@@ -21,7 +21,7 @@ class TochilinEHoarSortSimMerSEQ : public BaseTask {
   bool PostProcessingImpl() override;
 
   void QuickSort(std::vector<int> &arr, int low, int high);
-  std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
+  static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
 };
 
 }  // namespace tochilin_e_hoar_sort_sim_mer

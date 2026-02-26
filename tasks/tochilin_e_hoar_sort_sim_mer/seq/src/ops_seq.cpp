@@ -1,10 +1,10 @@
 #include "tochilin_e_hoar_sort_sim_mer/seq/include/ops_seq.hpp"
 
-#include <numeric>
+#include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
-#include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
@@ -27,29 +27,37 @@ void TochilinEHoarSortSimMerSEQ::QuickSort(std::vector<int> &arr, int low, int h
     return;
   }
 
-  int pivot = arr[(low + high) / 2];
-  int i = low;
-  int j = high;
+  std::vector<std::pair<int, int>> stack;
+  stack.emplace_back(low, high);
 
-  while (i <= j) {
-    while (arr[i] < pivot) {
-      ++i;
-    }
-    while (arr[j] > pivot) {
-      --j;
-    }
-    if (i <= j) {
-      std::swap(arr[i], arr[j]);
-      ++i;
-      --j;
-    }
-  }
+  while (!stack.empty()) {
+    auto [l, r] = stack.back();
+    stack.pop_back();
 
-  if (low < j) {
-    QuickSort(arr, low, j);
-  }
-  if (i < high) {
-    QuickSort(arr, i, high);
+    int i = l;
+    int j = r;
+    int pivot = arr[(l + r) / 2];
+
+    while (i <= j) {
+      while (arr[i] < pivot) {
+        ++i;
+      }
+      while (arr[j] > pivot) {
+        --j;
+      }
+      if (i <= j) {
+        std::swap(arr[i], arr[j]);
+        ++i;
+        --j;
+      }
+    }
+
+    if (l < j) {
+      stack.emplace_back(l, j);
+    }
+    if (i < r) {
+      stack.emplace_back(i, r);
+    }
   }
 }
 
@@ -66,10 +74,14 @@ bool TochilinEHoarSortSimMerSEQ::RunImpl() {
     return false;
   }
 
-  QuickSort(data, 0, static_cast<int>(data.size()) - 1);
+  const size_t mid = data.size() / 2;
 
-  std::vector<int> left(data.begin(), data.begin() + data.size() / 2);
-  std::vector<int> right(data.begin() + data.size() / 2, data.end());
+  std::vector<int> left(data.begin(), data.begin() + mid);
+  std::vector<int> right(data.begin() + mid, data.end());
+
+  QuickSort(left, 0, static_cast<int>(left.size()) - 1);
+  QuickSort(right, 0, static_cast<int>(right.size()) - 1);
+
   data = MergeSortedVectors(left, right);
 
   return true;
