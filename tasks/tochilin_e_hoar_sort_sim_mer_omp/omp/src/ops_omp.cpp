@@ -1,0 +1,120 @@
+#include "tochilin_e_hoar_sort_sim_mer_omp/omp/include/ops_omp.hpp"
+
+#include <omp.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <iterator>
+#include <utility>
+#include <vector>
+
+namespace tochilin_e_hoar_sort_sim_mer_omp {
+
+TochilinEHoarSortSimMerOMP::TochilinEHoarSortSimMerOMP(const InType &in) {
+  SetTypeOfTask(GetStaticTypeOfTask());
+  GetInput() = in;
+}
+
+bool TochilinEHoarSortSimMerOMP::ValidationImpl() {
+  return !GetInput().empty();
+}
+
+bool TochilinEHoarSortSimMerOMP::PreProcessingImpl() {
+  GetOutput() = GetInput();
+  return true;
+}
+
+std::pair<int, int> TochilinEHoarSortSimMerOMP::Partition(std::vector<int> &arr, int l, int r) {
+  int i = l;
+  int j = r;
+  const int pivot = arr[(l + r) / 2];
+
+  while (i <= j) {
+    while (arr[i] < pivot) {
+      ++i;
+    }
+    while (arr[j] > pivot) {
+      --j;
+    }
+    if (i <= j) {
+      std::swap(arr[i], arr[j]);
+      ++i;
+      --j;
+    }
+  }
+
+  return {i, j};
+}
+
+void TochilinEHoarSortSimMerOMP::QuickSortOMP(std::vector<int> &arr, int low, int high, int depth_limit) {
+  std::vector<std::pair<int, int>> stack;
+  stack.emplace_back(low, high);
+
+  while (!stack.empty()) {
+    auto [l, r] = stack.back();
+    stack.pop_back();
+
+    if (l >= r) {
+      continue;
+    }
+
+    auto [i, j] = Partition(arr, l, r);
+
+    const bool spawn_tasks = depth_limit > 0;
+
+    if (spawn_tasks) {
+#pragma omp task shared(arr)
+      QuickSortOMP(arr, l, j, depth_limit - 1);
+
+#pragma omp task shared(arr)
+      QuickSortOMP(arr, i, r, depth_limit - 1);
+    } else {
+      if (l < j) {
+        stack.emplace_back(l, j);
+      }
+      if (i < r) {
+        stack.emplace_back(i, r);
+      }
+    }
+  }
+
+#pragma omp taskwait
+}
+
+std::vector<int> TochilinEHoarSortSimMerOMP::MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b) {
+  std::vector<int> result;
+  result.reserve(a.size() + b.size());
+  std::ranges::merge(a, b, std::back_inserter(result));
+  return result;
+}
+
+bool TochilinEHoarSortSimMerOMP::RunImpl() {
+  auto &data = GetOutput();
+
+  if (data.empty()) {
+    return false;
+  }
+
+  const auto mid = static_cast<std::vector<int>::difference_type>(data.size() / 2);
+
+  std::vector<int> left(data.begin(), data.begin() + mid);
+  std::vector<int> right(data.begin() + mid, data.end());
+
+#pragma omp parallel
+  {
+#pragma omp single
+    {
+      QuickSortOMP(left, 0, static_cast<int>(left.size()) - 1, 3);
+      QuickSortOMP(right, 0, static_cast<int>(right.size()) - 1, 3);
+    }
+  }
+
+  data = MergeSortedVectors(left, right);
+  return true;
+}
+
+bool TochilinEHoarSortSimMerOMP::PostProcessingImpl() {
+  return std::ranges::is_sorted(GetOutput());
+}
+
+}  // namespace tochilin_e_hoar_sort_sim_mer_omp
