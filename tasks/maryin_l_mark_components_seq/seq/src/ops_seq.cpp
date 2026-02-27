@@ -41,6 +41,45 @@ void UnionLabels(std::vector<int> &parent, int a, int b) {
   }
 }
 
+void ProcessPixel(const Image &binary, Labels &labels, std::vector<int> &parent, int row, int col, int &next_label) {
+  if (binary[row][col] == 0) {
+    return;
+  }
+
+  int left_label = 0;
+  int top_label = 0;
+
+  if (col > 0) {
+    left_label = labels[row][col - 1];
+  }
+
+  if (row > 0) {
+    top_label = labels[row - 1][col];
+  }
+
+  if (left_label == 0 && top_label == 0) {
+    labels[row][col] = next_label++;
+    return;
+  }
+
+  if (left_label != 0 && top_label == 0) {
+    labels[row][col] = left_label;
+    return;
+  }
+
+  if (left_label == 0 && top_label != 0) {
+    labels[row][col] = top_label;
+    return;
+  }
+
+  const int min_label = std::min(left_label, top_label);
+  labels[row][col] = min_label;
+
+  if (left_label != top_label) {
+    UnionLabels(parent, left_label, top_label);
+  }
+}
+
 }  // namespace
 
 MaryinLMarkComponentsSEQ::MaryinLMarkComponentsSEQ(const InType &in) {
@@ -111,7 +150,7 @@ void MaryinLMarkComponentsSEQ::FirstPass() {
   const int max_labels = height * width;
 
   auto &parent = GetParentStorage();
-  parent.assign(static_cast<std::size_t>(max_labels + 1), 0);
+  parent.assign(static_cast<std::size_t>(max_labels) + 1ULL, 0);
 
   for (int i = 0; i <= max_labels; ++i) {
     parent[i] = i;
@@ -121,43 +160,7 @@ void MaryinLMarkComponentsSEQ::FirstPass() {
 
   for (int row = 0; row < height; ++row) {
     for (int col = 0; col < width; ++col) {
-      if (binary_[row][col] == 0) {
-        continue;
-      }
-
-      int left_label = 0;
-      int top_label = 0;
-
-      if (col > 0) {
-        left_label = labels_[row][col - 1];
-      }
-
-      if (row > 0) {
-        top_label = labels_[row - 1][col];
-      }
-
-      if (left_label == 0 && top_label == 0) {
-        labels_[row][col] = next_label;
-        ++next_label;
-        continue;
-      }
-
-      if (left_label != 0 && top_label == 0) {
-        labels_[row][col] = left_label;
-        continue;
-      }
-
-      if (left_label == 0 && top_label != 0) {
-        labels_[row][col] = top_label;
-        continue;
-      }
-
-      const int min_label = std::min(left_label, top_label);
-      labels_[row][col] = min_label;
-
-      if (left_label != top_label) {
-        UnionLabels(parent, left_label, top_label);
-      }
+      ProcessPixel(binary_, labels_, parent, row, col, next_label);
     }
   }
 
