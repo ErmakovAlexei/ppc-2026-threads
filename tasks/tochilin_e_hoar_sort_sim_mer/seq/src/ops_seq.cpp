@@ -81,7 +81,7 @@ bool TochilinEHoarSortSimMerSEQ::RunImpl() {
     return false;
   }
 
-  const auto mid = data.size() / 2;
+  const auto mid = static_cast<std::vector<int>::difference_type>(data.size() / 2);
 
   std::vector<int> left(data.begin(), data.begin() + mid);
   std::vector<int> right(data.begin() + mid, data.end());
