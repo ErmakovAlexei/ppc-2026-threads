@@ -66,7 +66,7 @@ class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, 
     return true;
   }
 
-  InType GetTestinput_data_() final {
+  InType GetTestInputData() final {
     return input_data_;
   }
 };

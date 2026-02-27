@@ -81,7 +81,7 @@ void FloodFillComponent(const Image &binary_image, Labels &result_labels, int he
     const auto [current_row, current_col] = stack.back();
     stack.pop_back();
 
-    const std::array<std::pair<int, int>, 4> directions{{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}}};
+    const std::array<std::pair<int, int>, 4> directions{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
 
     for (const auto &dir : directions) {
       const int next_row = current_row + dir.first;
