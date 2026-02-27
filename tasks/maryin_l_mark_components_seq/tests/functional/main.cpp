@@ -20,7 +20,7 @@ using Image = std::vector<std::vector<int>>;
 using Labels = std::vector<std::vector<int>>;
 
 Image MakeImage(int height, int width, int fill_value = 0) {
-  return Image(static_cast<size_t>(height), std::vector<int>(static_cast<size_t>(width), fill_value));
+  return {static_cast<size_t>(height), std::vector<int>(static_cast<size_t>(width), fill_value)};
 }
 
 bool HaveSameDimensions(const Labels &first, const Labels &second) {
@@ -32,19 +32,19 @@ bool HaveSameDimensions(const Labels &first, const Labels &second) {
 
 Labels NormalizeLabels(int height, int width, const Labels &source) {
   Labels normalized = source;
-  std::vector<int> label_mapping;
-  label_mapping.resize(100000, 0);
+
+  std::vector<int> label_mapping(100000, 0);
   int next_component_id = 1;
 
   for (int row_idx = 0; row_idx < height; ++row_idx) {
     for (int col_idx = 0; col_idx < width; ++col_idx) {
-      int label_value = normalized[row_idx][col_idx];
+      const int label_value = normalized[row_idx][col_idx];
       if (label_value == 0) {
         continue;
       }
 
-      if (label_value >= static_cast<int>(label_mapping.size())) {
-        label_mapping.resize(static_cast<size_t>(label_value + 1000), 0);
+      if (static_cast<size_t>(label_value) >= label_mapping.size()) {
+        label_mapping.resize(static_cast<size_t>(label_value) + 1000ULL, 0);
       }
 
       if (label_mapping[static_cast<size_t>(label_value)] == 0) {
@@ -78,11 +78,10 @@ void FloodFillComponent(const Image &binary_image, Labels &result_labels, int he
   result_labels[start_row][start_col] = component_label;
 
   while (!stack.empty()) {
-    auto [current_row, current_col] = stack.back();
+    const auto [current_row, current_col] = stack.back();
     stack.pop_back();
 
-    // 4 направления (вверх, вниз, лево, право)
-    const std::array<std::pair<int, int>, 4> directions{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
+    const std::array<std::pair<int, int>, 4> directions{{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}}};
 
     for (const auto &dir : directions) {
       const int next_row = current_row + dir.first;
@@ -102,6 +101,7 @@ Labels ComputeReferenceLabels(const Image &binary) {
   const int width = height != 0 ? static_cast<int>(binary[0].size()) : 0;
 
   Labels result(static_cast<size_t>(height), std::vector<int>(static_cast<size_t>(width), 0));
+
   int current_label = 0;
 
   std::vector<std::pair<int, int>> stack;
@@ -135,63 +135,68 @@ class MaryinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, 
     const int height = std::get<1>(params);
     const std::string &scenario_name = std::get<2>(params);
 
-    inputData.binary = MakeImage(height, width);
+    input_data_.binary = MakeImage(height, width);
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<double> probabilityDist(0.0, 1.0);
+    std::uniform_real_distribution<double> probability_dist(0.0, 1.0);
 
     if (scenario_name == "SingleBlob") {
-      for (int row_idx = 0; row_idx < height; ++row_idx) {
-        for (int col_idx = 0; col_idx < width; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = 1;
+      for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
+          input_data_.binary[r][c] = 1;
         }
       }
+
     } else if (scenario_name == "TwoBlocks") {
-      for (int row_idx = 1; row_idx < height / 2; ++row_idx) {
-        for (int col_idx = 1; col_idx < width / 2; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = 1;
+      for (int r = 1; r < height / 2; ++r) {
+        for (int c = 1; c < width / 2; ++c) {
+          input_data_.binary[r][c] = 1;
         }
       }
-      for (int row_idx = (height / 2) + 1; row_idx < height - 1; ++row_idx) {
-        for (int col_idx = (width / 2) + 1; col_idx < width - 1; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = 1;
+
+      for (int r = height / 2 + 1; r < height - 1; ++r) {
+        for (int c = width / 2 + 1; c < width - 1; ++c) {
+          input_data_.binary[r][c] = 1;
         }
       }
+
     } else if (scenario_name == "Checker") {
-      for (int row_idx = 0; row_idx < height; ++row_idx) {
-        for (int col_idx = 0; col_idx < width; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = static_cast<int>((row_idx + col_idx) % 2);
+      for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
+          input_data_.binary[r][c] = (r + c) % 2;
         }
       }
+
     } else if (scenario_name == "Diagonal") {
-      for (int row_idx = 0; row_idx < height; ++row_idx) {
-        for (int col_idx = 0; col_idx < width; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = (row_idx % 3 == col_idx % 3) ? 1 : 0;
+      for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
+          input_data_.binary[r][c] = (r % 3 == c % 3) ? 1 : 0;
         }
       }
+
     } else if (scenario_name == "Random") {
-      for (int row_idx = 0; row_idx < height; ++row_idx) {
-        for (int col_idx = 0; col_idx < width; ++col_idx) {
-          inputData.binary[row_idx][col_idx] = (probabilityDist(gen) < 0.25) ? 1 : 0;
+      for (int r = 0; r < height; ++r) {
+        for (int c = 0; c < width; ++c) {
+          input_data_.binary[r][c] = (probability_dist(gen) < 0.25) ? 1 : 0;
         }
       }
     }
 
-    expectedOutput.labels = ComputeReferenceLabels(inputData.binary);
+    expected_output_.labels = ComputeReferenceLabels(input_data_.binary);
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
-    return SameComponentStructure(expectedOutput.labels, output_data.labels);
+    return SameComponentStructure(expected_output_.labels, output_data.labels);
   }
 
   InType GetTestInputData() final {
-    return inputData;
+    return input_data_;
   }
 
  private:
-  InType inputData{};
-  OutType expectedOutput{};
+  InType input_data_{};
+  OutType expected_output_{};
 };
 
 namespace {
@@ -200,9 +205,9 @@ TEST_P(MaryinLRunFuncTestComponents, MarkComponentsSeq) {
   ExecuteTest(GetParam());
 }
 
-const std::array<TestType, 6> kTestParams = {std::make_tuple(5, 5, "SingleBlob"), std::make_tuple(8, 10, "TwoBlocks"),
-                                             std::make_tuple(7, 7, "Checker"),    std::make_tuple(12, 12, "Diagonal"),
-                                             std::make_tuple(15, 10, "Random"),   std::make_tuple(4, 6, "TwoBlocks")};
+const std::array<TestType, 6> kTestParams{std::make_tuple(5, 5, "SingleBlob"), std::make_tuple(8, 10, "TwoBlocks"),
+                                          std::make_tuple(7, 7, "Checker"),    std::make_tuple(12, 12, "Diagonal"),
+                                          std::make_tuple(15, 10, "Random"),   std::make_tuple(4, 6, "TwoBlocks")};
 
 const auto kTestTasksList =
     ppc::util::AddFuncTask<MaryinLMarkComponentsSEQ, InType>(kTestParams, PPC_SETTINGS_maryin_l_mark_components_seq);
@@ -214,5 +219,4 @@ const auto kPerfTestName = MaryinLRunFuncTestComponents::PrintFuncTestName<Maryi
 INSTANTIATE_TEST_SUITE_P(ComponentLabelingTests, MaryinLRunFuncTestComponents, kGtestValues, kPerfTestName);
 
 }  // namespace
-
 }  // namespace maryin_l_mark_components_seq

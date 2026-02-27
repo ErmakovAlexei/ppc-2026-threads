@@ -34,19 +34,19 @@ class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, 
  protected:
   const int k_width_pixels = 1024;
   const int k_height_pixels = 1024;
-  InType inputData{};
+  InType input_data_{};
 
   void SetUp() override {
-    inputData.binary = MakeRandomBinaryImage(k_height_pixels, k_width_pixels, 0.3);
+    input_data_.binary = MakeRandomBinaryImage(k_height_pixels, k_width_pixels, 0.3);
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
     const auto &output_labels = output_data.labels;
 
-    if (output_labels.size() != inputData.binary.size()) {
+    if (output_labels.size() != input_data_.binary.size()) {
       return false;
     }
-    if (!output_labels.empty() && output_labels[0].size() != inputData.binary[0].size()) {
+    if (!output_labels.empty() && output_labels[0].size() != input_data_.binary[0].size()) {
       return false;
     }
 
@@ -55,10 +55,10 @@ class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, 
 
     for (int row_idx = 0; row_idx < height_pixels; ++row_idx) {
       for (int col_idx = 0; col_idx < width_pixels; ++col_idx) {
-        if (inputData.binary[row_idx][col_idx] == 0 && output_labels[row_idx][col_idx] != 0) {
+        if (input_data_.binary[row_idx][col_idx] == 0 && output_labels[row_idx][col_idx] != 0) {
           return false;
         }
-        if (inputData.binary[row_idx][col_idx] == 1 && output_labels[row_idx][col_idx] <= 0) {
+        if (input_data_.binary[row_idx][col_idx] == 1 && output_labels[row_idx][col_idx] <= 0) {
           return false;
         }
       }
@@ -66,8 +66,8 @@ class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, 
     return true;
   }
 
-  InType GetTestInputData() final {
-    return inputData;
+  InType GetTestinput_data_() final {
+    return input_data_;
   }
 };
 

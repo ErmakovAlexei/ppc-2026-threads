@@ -9,6 +9,10 @@
 namespace maryin_l_mark_components_seq {
 
 namespace detail {
+std::vector<int> &GetParentStorage();
+}  // namespace detail
+
+namespace detail {
 std::vector<int> &GetParentStorage() {
   thread_local std::vector<int> parent_storage;
   return parent_storage;
@@ -37,10 +41,12 @@ bool MaryinLMarkComponentsSEQ::ValidationImpl() {
   if (img.empty()) {
     return false;
   }
+
   const std::size_t img_width = img[0].size();
   if (img_width == 0) {
     return false;
   }
+
   for (const auto &row : img) {
     if (row.size() != img_width) {
       return false;
@@ -63,7 +69,7 @@ bool MaryinLMarkComponentsSEQ::PreProcessingImpl() {
     return false;
   }
 
-  if (static_cast<unsigned long long>(height) * width > 100000000ULL) {
+  if (static_cast<std::uint64_t>(height) * static_cast<std::uint64_t>(width) > 100000000ULL) {
     return false;
   }
 
@@ -84,6 +90,7 @@ bool MaryinLMarkComponentsSEQ::RunImpl() {
 }
 
 namespace {
+
 int FindRoot(std::vector<int> &parent, int x) {
   while (parent[static_cast<std::size_t>(x)] != x) {
     parent[static_cast<std::size_t>(x)] = parent[static_cast<std::size_t>(parent[static_cast<std::size_t>(x)])];
@@ -95,15 +102,18 @@ int FindRoot(std::vector<int> &parent, int x) {
 void UnionLabels(std::vector<int> &parent, int a, int b) {
   const int root_a = FindRoot(parent, a);
   const int root_b = FindRoot(parent, b);
+
   if (root_a == root_b) {
     return;
   }
+
   if (root_a < root_b) {
     parent[static_cast<std::size_t>(root_b)] = root_a;
   } else {
     parent[static_cast<std::size_t>(root_a)] = root_b;
   }
 }
+
 }  // namespace
 
 void MaryinLMarkComponentsSEQ::FirstPass() {
@@ -113,7 +123,8 @@ void MaryinLMarkComponentsSEQ::FirstPass() {
   const int max_labels = height * width;
 
   auto &parent = detail::GetParentStorage();
-  parent.resize(static_cast<std::size_t>(max_labels + 1));
+  parent.resize(static_cast<std::size_t>(max_labels) + 1);
+
   for (int idx = 0; idx <= max_labels; ++idx) {
     parent[static_cast<std::size_t>(idx)] = idx;
   }
@@ -133,6 +144,7 @@ void MaryinLMarkComponentsSEQ::FirstPass() {
       if (col > 0 && binary_[row][col - 1] == 1) {
         left_label = labels_[row][col - 1];
       }
+
       if (row > 0 && binary_[row - 1][col] == 1) {
         top_label = labels_[row - 1][col];
       }
@@ -147,6 +159,7 @@ void MaryinLMarkComponentsSEQ::FirstPass() {
       } else {
         const int min_label = std::min(left_label, top_label);
         labels_[row][col] = min_label;
+
         if (left_label != top_label) {
           UnionLabels(parent, left_label, top_label);
         }
@@ -165,7 +178,7 @@ void MaryinLMarkComponentsSEQ::SecondPass() {
 
   auto &parent = detail::GetParentStorage();
 
-  auto FindRootLocal = [&parent](int x) {
+  auto find_root_local = [&parent](int x) {
     int root = x;
     while (parent[static_cast<std::size_t>(root)] != root) {
       root = parent[static_cast<std::size_t>(root)];
@@ -186,18 +199,21 @@ void MaryinLMarkComponentsSEQ::SecondPass() {
   for (int row = 0; row < height; ++row) {
     for (int col = 0; col < width; ++col) {
       int label = labels_[row][col];
+
       if (label == 0) {
         continue;
       }
-      const int root = FindRootLocal(label);
 
-      if (root >= static_cast<int>(root_to_compact.size())) {
+      const int root = find_root_local(label);
+
+      if (static_cast<std::size_t>(root) >= root_to_compact.size()) {
         root_to_compact.resize(static_cast<std::size_t>(root) + 1, 0);
       }
 
       if (root_to_compact[static_cast<std::size_t>(root)] == 0) {
         root_to_compact[static_cast<std::size_t>(root)] = next_id++;
       }
+
       labels_[row][col] = root_to_compact[static_cast<std::size_t>(root)];
     }
   }
