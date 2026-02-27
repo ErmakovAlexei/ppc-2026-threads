@@ -1,7 +1,6 @@
 #include "tochilin_e_hoar_sort_sim_mer/seq/include/ops_seq.hpp"
 
 #include <algorithm>
-#include <cstddef>
 #include <iterator>
 #include <utility>
 #include <vector>
