@@ -41,7 +41,7 @@ TEST_P(TochilinEHoarSortSimMerRunPerfTestsOMP, RunPerfModes) {
 namespace {
 
 const auto kAllPerfTasks =
-    ppc::util::MakeAllPerfTasks<InType, TochilinEHoarSortSimMerSEQ>(PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer_omp);
+    ppc::util::MakeAllPerfTasks<InType, TochilinEHoarSortSimMerOMP>(PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer_omp);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 

@@ -51,22 +51,27 @@ void TochilinEHoarSortSimMerOMP::QuickSortOMP(std::vector<int> &arr, int low, in
   stack.emplace_back(low, high);
 
   while (!stack.empty()) {
-    auto [l, r] = stack.back();
+    const std::pair<int, int> seg = stack.back();
     stack.pop_back();
+
+    int l = seg.first;
+    int r = seg.second;
 
     if (l >= r) {
       continue;
     }
 
-    auto [i, j] = Partition(arr, l, r);
+    const std::pair<int, int> bounds = Partition(arr, l, r);
+    int i = bounds.first;
+    int j = bounds.second;
 
     const bool spawn_tasks = depth_limit > 0;
 
     if (spawn_tasks) {
-#pragma omp task shared(arr)
+#pragma omp task shared(arr) firstprivate(l, j, depth_limit)
       QuickSortOMP(arr, l, j, depth_limit - 1);
 
-#pragma omp task shared(arr)
+#pragma omp task shared(arr) firstprivate(i, r, depth_limit)
       QuickSortOMP(arr, i, r, depth_limit - 1);
     } else {
       if (l < j) {
