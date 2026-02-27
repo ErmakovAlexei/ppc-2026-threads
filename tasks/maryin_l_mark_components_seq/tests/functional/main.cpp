@@ -11,6 +11,7 @@
 #include "maryin_l_mark_components_seq/common/include/common.hpp"
 #include "maryin_l_mark_components_seq/seq/include/ops_seq.hpp"
 #include "util/include/func_test_util.hpp"
+#include "util/include/util.hpp"
 
 namespace maryin_l_mark_components_seq {
 
@@ -118,6 +119,54 @@ Labels ComputeReferenceLabels(const Image &binary) {
   return result;
 }
 
+/* ---------- FIX cognitive complexity ---------- */
+
+void FillSingleBlob(Image &img, int height, int width) {
+  for (int row = 0; row < height; ++row) {
+    for (int col = 0; col < width; ++col) {
+      img[row][col] = 1;
+    }
+  }
+}
+
+void FillTwoBlocks(Image &img, int height, int width) {
+  for (int row = 1; row < (height / 2); ++row) {
+    for (int col = 1; col < (width / 2); ++col) {
+      img[row][col] = 1;
+    }
+  }
+
+  for (int row = (height / 2) + 1; row < height - 1; ++row) {
+    for (int col = (width / 2) + 1; col < width - 1; ++col) {
+      img[row][col] = 1;
+    }
+  }
+}
+
+void FillChecker(Image &img, int height, int width) {
+  for (int row = 0; row < height; ++row) {
+    for (int col = 0; col < width; ++col) {
+      img[row][col] = (row + col) % 2;
+    }
+  }
+}
+
+void FillDiagonal(Image &img, int height, int width) {
+  for (int row = 0; row < height; ++row) {
+    for (int col = 0; col < width; ++col) {
+      img[row][col] = (row % 3 == col % 3) ? 1 : 0;
+    }
+  }
+}
+
+void FillRandom(Image &img, int height, int width, std::mt19937 &gen, std::uniform_real_distribution<double> &dist) {
+  for (int row = 0; row < height; ++row) {
+    for (int col = 0; col < width; ++col) {
+      img[row][col] = (dist(gen) < 0.25) ? 1 : 0;
+    }
+  }
+}
+
 }  // namespace
 
 class MaryinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, OutType, TestType> {
@@ -142,45 +191,15 @@ class MaryinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, 
     std::uniform_real_distribution<double> probability_dist(0.0, 1.0);
 
     if (scenario_name == "SingleBlob") {
-      for (int r = 0; r < height; ++r) {
-        for (int c = 0; c < width; ++c) {
-          input_data_.binary[r][c] = 1;
-        }
-      }
-
+      FillSingleBlob(input_data_.binary, height, width);
     } else if (scenario_name == "TwoBlocks") {
-      for (int r = 1; r < height / 2; ++r) {
-        for (int c = 1; c < width / 2; ++c) {
-          input_data_.binary[r][c] = 1;
-        }
-      }
-
-      for (int r = height / 2 + 1; r < height - 1; ++r) {
-        for (int c = width / 2 + 1; c < width - 1; ++c) {
-          input_data_.binary[r][c] = 1;
-        }
-      }
-
+      FillTwoBlocks(input_data_.binary, height, width);
     } else if (scenario_name == "Checker") {
-      for (int r = 0; r < height; ++r) {
-        for (int c = 0; c < width; ++c) {
-          input_data_.binary[r][c] = (r + c) % 2;
-        }
-      }
-
+      FillChecker(input_data_.binary, height, width);
     } else if (scenario_name == "Diagonal") {
-      for (int r = 0; r < height; ++r) {
-        for (int c = 0; c < width; ++c) {
-          input_data_.binary[r][c] = (r % 3 == c % 3) ? 1 : 0;
-        }
-      }
-
+      FillDiagonal(input_data_.binary, height, width);
     } else if (scenario_name == "Random") {
-      for (int r = 0; r < height; ++r) {
-        for (int c = 0; c < width; ++c) {
-          input_data_.binary[r][c] = (probability_dist(gen) < 0.25) ? 1 : 0;
-        }
-      }
+      FillRandom(input_data_.binary, height, width, gen, probability_dist);
     }
 
     expected_output_.labels = ComputeReferenceLabels(input_data_.binary);
