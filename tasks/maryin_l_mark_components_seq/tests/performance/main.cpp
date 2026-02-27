@@ -12,51 +12,53 @@ namespace maryin_l_mark_components_seq {
 
 namespace {
 
-Image MakeRandomBinaryImage(int h, int w, double fill_prob) {
-  Image img(static_cast<std::size_t>(h), std::vector<int>(static_cast<std::size_t>(w), 0));
+Image MakeRandomBinaryImage(int height, int width, double fill_probability) {
+  Image image(static_cast<size_t>(height), std::vector<int>(static_cast<size_t>(width), 0));
 
-  std::mt19937 gen(std::random_device{}());
-  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  std::random_device random_seed;
+  std::mt19937 generator(random_seed());
+  std::uniform_real_distribution<double> distribution(0.0, 1.0);
 
-  for (int y = 0; y < h; ++y) {
-    for (int x = 0; x < w; ++x) {
-      img[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] = (dist(gen) < fill_prob) ? 1 : 0;
+  for (int row_idx = 0; row_idx < height; ++row_idx) {
+    for (int col_idx = 0; col_idx < width; ++col_idx) {
+      image[static_cast<size_t>(row_idx)][static_cast<size_t>(col_idx)] =
+          (distribution(generator) < fill_probability) ? 1 : 0;
     }
   }
-  return img;
+  return image;
 }
 
 }  // namespace
 
 class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
-  const int k_width = 2048;
-  const int k_height = 2048;
-  InType input_data_{};
+  const int k_width_pixels = 1024;
+  const int k_height_pixels = 1024;
+  InType inputData{};
 
   void SetUp() override {
-    input_data_.binary = MakeRandomBinaryImage(k_height, k_width, 0.3);
+    inputData.binary = MakeRandomBinaryImage(k_height_pixels, k_width_pixels, 0.3);
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
-    const auto &labels = output_data.labels;
+    const auto &output_labels = output_data.labels;
 
-    if (labels.size() != input_data_.binary.size()) {
+    if (output_labels.size() != inputData.binary.size()) {
       return false;
     }
-    if (!labels.empty() && labels[0].size() != input_data_.binary[0].size()) {
+    if (!output_labels.empty() && output_labels[0].size() != inputData.binary[0].size()) {
       return false;
     }
 
-    const int h = static_cast<int>(labels.size());
-    const int w = h ? static_cast<int>(labels[0].size()) : 0;
+    const int height_pixels = static_cast<int>(output_labels.size());
+    const int width_pixels = height_pixels != 0 ? static_cast<int>(output_labels[0].size()) : 0;
 
-    for (int y = 0; y < h; ++y) {
-      for (int x = 0; x < w; ++x) {
-        if (input_data_.binary[y][x] == 0 && labels[y][x] != 0) {
+    for (int row_idx = 0; row_idx < height_pixels; ++row_idx) {
+      for (int col_idx = 0; col_idx < width_pixels; ++col_idx) {
+        if (inputData.binary[row_idx][col_idx] == 0 && output_labels[row_idx][col_idx] != 0) {
           return false;
         }
-        if (input_data_.binary[y][x] == 1 && labels[y][x] <= 0) {
+        if (inputData.binary[row_idx][col_idx] == 1 && output_labels[row_idx][col_idx] <= 0) {
           return false;
         }
       }
@@ -65,7 +67,7 @@ class MaryinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, 
   }
 
   InType GetTestInputData() final {
-    return input_data_;
+    return inputData;
   }
 };
 

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include "maryin_l_mark_components_seq/common/include/common.hpp"
 #include "task/include/task.hpp"
 
