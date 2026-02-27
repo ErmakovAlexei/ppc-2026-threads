@@ -62,7 +62,9 @@ void TochilinEHoarSortSimMerOMP::QuickSortOMP(std::vector<int> &arr, int low, in
       continue;
     }
 
-    const auto [i, j] = Partition(arr, l, r);
+    const std::pair<int, int> bounds = Partition(arr, l, r);
+    int i = bounds.first;
+    int j = bounds.second;
 
     const bool spawn_tasks = depth_limit > 0;
 
