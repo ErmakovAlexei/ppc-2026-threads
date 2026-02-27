@@ -1,7 +1,9 @@
 #include "tochilin_e_hoar_sort_sim_mer/seq/include/ops_seq.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
@@ -22,6 +24,27 @@ bool TochilinEHoarSortSimMerSEQ::PreProcessingImpl() {
   return true;
 }
 
+std::pair<int, int> TochilinEHoarSortSimMerSEQ::Partition(std::vector<int> &arr, int l, int r) {
+  int i = l;
+  int j = r;
+  int pivot = arr[(l + r) / 2];
+
+  while (i <= j) {
+    while (arr[i] < pivot) {
+      ++i;
+    }
+    while (arr[j] > pivot) {
+      --j;
+    }
+    if (i <= j) {
+      std::swap(arr[i], arr[j]);
+      ++i;
+      --j;
+    }
+  }
+  return {i, j};
+}
+
 void TochilinEHoarSortSimMerSEQ::QuickSort(std::vector<int> &arr, int low, int high) {
   if (low >= high) {
     return;
@@ -34,23 +57,7 @@ void TochilinEHoarSortSimMerSEQ::QuickSort(std::vector<int> &arr, int low, int h
     auto [l, r] = stack.back();
     stack.pop_back();
 
-    int i = l;
-    int j = r;
-    int pivot = arr[(l + r) / 2];
-
-    while (i <= j) {
-      while (arr[i] < pivot) {
-        ++i;
-      }
-      while (arr[j] > pivot) {
-        --j;
-      }
-      if (i <= j) {
-        std::swap(arr[i], arr[j]);
-        ++i;
-        --j;
-      }
-    }
+    auto [i, j] = Partition(arr, l, r);
 
     if (l < j) {
       stack.emplace_back(l, j);
@@ -64,7 +71,7 @@ void TochilinEHoarSortSimMerSEQ::QuickSort(std::vector<int> &arr, int low, int h
 std::vector<int> TochilinEHoarSortSimMerSEQ::MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b) {
   std::vector<int> result;
   result.reserve(a.size() + b.size());
-  std::merge(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(result));
+  std::ranges::merge(a, b, std::back_inserter(result));
   return result;
 }
 
@@ -74,7 +81,7 @@ bool TochilinEHoarSortSimMerSEQ::RunImpl() {
     return false;
   }
 
-  const size_t mid = data.size() / 2;
+  const auto mid = data.size() / 2;
 
   std::vector<int> left(data.begin(), data.begin() + mid);
   std::vector<int> right(data.begin() + mid, data.end());

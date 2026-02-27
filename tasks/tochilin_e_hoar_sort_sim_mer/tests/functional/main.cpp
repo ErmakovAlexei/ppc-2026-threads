@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <random>
 #include <string>
 #include <tuple>
@@ -9,6 +10,7 @@
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
 #include "tochilin_e_hoar_sort_sim_mer/seq/include/ops_seq.hpp"
 #include "util/include/func_test_util.hpp"
+#include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
@@ -25,43 +27,43 @@ class TochilinEHoarSortSimMerRunFuncTestsSEQ : public ppc::util::BaseRunFuncTest
     const int n = std::get<0>(params);
     const std::string &desc = std::get<1>(params);
 
-    input_data.resize(static_cast<std::size_t>(n));
+    input_data_.resize(static_cast<std::size_t>(n));
 
     if (desc == "OneElement") {
       if (n > 0) {
-        input_data[0] = 42;
+        input_data_[0] = 42;
       }
     } else if (desc == "AlreadySorted") {
       for (int i = 0; i < n; ++i) {
-        input_data[static_cast<std::size_t>(i)] = i;
+        input_data_[static_cast<std::size_t>(i)] = i;
       }
     } else if (desc == "ReverseSorted") {
       for (int i = 0; i < n; ++i) {
-        input_data[static_cast<std::size_t>(i)] = n - i;
+        input_data_[static_cast<std::size_t>(i)] = n - i;
       }
     } else {
       if (n > 0) {
         std::mt19937 gen(std::random_device{}());
         std::uniform_int_distribution<> dis(-1000, 1000);
         for (int i = 0; i < n; ++i) {
-          input_data[static_cast<std::size_t>(i)] = dis(gen);
+          input_data_[static_cast<std::size_t>(i)] = dis(gen);
         }
       }
     }
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
-    OutType reference = input_data;
+    OutType reference = input_data_;
     std::ranges::sort(reference);
     return reference == output_data;
   }
 
   InType GetTestInputData() final {
-    return input_data;
+    return input_data_;
   }
 
  private:
-  InType input_data;
+  InType input_data_;
 };
 
 namespace {

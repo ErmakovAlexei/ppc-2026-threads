@@ -20,7 +20,8 @@ class TochilinEHoarSortSimMerSEQ : public BaseTask {
   bool RunImpl() override;
   bool PostProcessingImpl() override;
 
-  void QuickSort(std::vector<int> &arr, int low, int high);
+  static void QuickSort(std::vector<int> &arr, int low, int high);
+  static std::pair<int, int> Partition(std::vector<int> &arr, int l, int r);
   static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
 };
 
