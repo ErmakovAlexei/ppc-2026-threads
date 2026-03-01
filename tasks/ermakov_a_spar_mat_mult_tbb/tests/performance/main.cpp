@@ -53,7 +53,10 @@ MatrixCRS DenseToCRS(const DenseMatrix &m, double eps = 1e-12) {
         r.col_index.push_back(j);
       }
     }
-    r.row_ptr[static_cast<std::size_t>(i + 1)] = static_cast<int>(r.values.size());
+    const std::size_t next_row = static_cast<std::size_t>(i + 1);
+    const int nnz = static_cast<int>(r.values.size());
+
+    r.row_ptr[next_row] = nnz;
   }
 
   return r;

@@ -22,7 +22,7 @@ using DenseMatrix = std::vector<std::vector<std::complex<double>>>;
 
 DenseMatrix MakeDense(int rows, int cols) {
   return DenseMatrix(static_cast<std::size_t>(rows),
-                     std::vector<std::complex<double>>(static_cast<std::size_t>(cols), std::complex<double>(0.0, 0.0)));
+                     std::vector<std::complex<double>>(static_cast<std::size_t>(cols), {0.0, 0.0}));
 }
 
 void MultiplyRow(const DenseMatrix &a, const DenseMatrix &b, DenseMatrix &c, int i, int n, int p) {
@@ -118,7 +118,8 @@ MatrixCRS DenseToCRS(const DenseMatrix &m, double eps = 1e-12) {
         r.col_index.push_back(j);
       }
     }
-    r.row_ptr[static_cast<std::size_t>(i + 1)] = static_cast<int>(r.values.size());
+    const int nnz = static_cast<int>(r.values.size());
+    r.row_ptr[static_cast<std::size_t>(i + 1)] = nnz;
   }
 
   return r;
