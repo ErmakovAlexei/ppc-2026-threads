@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
+#include <ranges>
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
@@ -157,6 +158,24 @@ void ErmakovASparMatMultOMP::AccumulateRowProducts(int row_index, std::vector<st
   }
 }
 
+void ErmakovASparMatMultOMP::CollectRowValues(const std::vector<std::complex<double>> &row_vals,
+                                              const std::vector<int> &used_cols, std::vector<int> &cols,
+                                              std::vector<std::complex<double>> &vals) {
+  cols.clear();
+  vals.clear();
+
+  cols.reserve(used_cols.size());
+  vals.reserve(used_cols.size());
+
+  for (int col : used_cols) {
+    const auto &v = row_vals[static_cast<std::size_t>(col)];
+    if (v != std::complex<double>(0.0, 0.0)) {
+      cols.push_back(col);
+      vals.push_back(v);
+    }
+  }
+}
+
 bool ErmakovASparMatMultOMP::RunImpl() {
   const int m = a_.rows;
   const int p = b_.cols;
@@ -165,71 +184,81 @@ bool ErmakovASparMatMultOMP::RunImpl() {
     return false;
   }
 
-  c_.values.clear();
-  c_.col_index.clear();
-  std::ranges::fill(c_.row_ptr, 0);
-
   if (m == 0 || p == 0) {
     return true;
   }
 
-  std::vector<int> nnz_per_row(static_cast<std::size_t>(m), 0);
+  std::vector<std::vector<std::complex<double>>> row_values(static_cast<std::size_t>(m));
+  std::vector<std::vector<int>> row_cols(static_cast<std::size_t>(m));
 
-#pragma omp parallel default(none) shared(nnz_per_row, m, p)
+#pragma omp parallel
   {
     std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
     std::vector<int> row_mark(static_cast<std::size_t>(p), -1);
     std::vector<int> used_cols;
     used_cols.reserve(256);
 
-#pragma omp for schedule(static)
+#pragma omp for
     for (int i = 0; i < m; ++i) {
-      AccumulateRowProducts(i, row_vals, row_mark, used_cols);
+      used_cols.clear();
 
-      int count = 0;
-      for (int col : used_cols) {
-        if (row_vals[static_cast<std::size_t>(col)] != std::complex<double>(0.0, 0.0)) {
-          ++count;
+      const auto row_i = static_cast<std::size_t>(i);
+      const int a_start = a_.row_ptr[row_i];
+      const int a_end = a_.row_ptr[row_i + 1];
+
+      for (int ak = a_start; ak < a_end; ++ak) {
+        const auto ak_i = static_cast<std::size_t>(ak);
+
+        const int j = a_.col_index[ak_i];
+        const auto a_ij = a_.values[ak_i];
+
+        const auto row_j = static_cast<std::size_t>(j);
+        const int b_start = b_.row_ptr[row_j];
+        const int b_end = b_.row_ptr[row_j + 1];
+
+        for (int bk = b_start; bk < b_end; ++bk) {
+          const auto bk_i = static_cast<std::size_t>(bk);
+
+          const int k = b_.col_index[bk_i];
+          const auto b_jk = b_.values[bk_i];
+
+          const auto col_k = static_cast<std::size_t>(k);
+
+          if (row_mark[col_k] != i) {
+            row_mark[col_k] = i;
+            row_vals[col_k] = a_ij * b_jk;
+            used_cols.push_back(k);
+          } else {
+            row_vals[col_k] += a_ij * b_jk;
+          }
         }
       }
-      nnz_per_row[static_cast<std::size_t>(i)] = count;
+
+      SortUsedCols(used_cols);
+
+      CollectRowValues(row_vals, used_cols, row_cols[row_i], row_values[row_i]);
     }
   }
 
   int nnz = 0;
+
   for (int i = 0; i < m; ++i) {
-    c_.row_ptr[static_cast<std::size_t>(i)] = nnz;
-    nnz += nnz_per_row[static_cast<std::size_t>(i)];
+    const auto row_i = static_cast<std::size_t>(i);
+    c_.row_ptr[row_i] = nnz;
+    nnz += static_cast<int>(row_values[row_i].size());
   }
+
   c_.row_ptr[static_cast<std::size_t>(m)] = nnz;
 
-  c_.values.resize(static_cast<std::size_t>(nnz));
-  c_.col_index.resize(static_cast<std::size_t>(nnz));
+  c_.values.reserve(static_cast<std::size_t>(nnz));
+  c_.col_index.reserve(static_cast<std::size_t>(nnz));
 
-#pragma omp parallel default(none) shared(m, p)
-  {
-    std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
-    std::vector<int> row_mark(static_cast<std::size_t>(p), -1);
-    std::vector<int> used_cols;
-    used_cols.reserve(256);
+  for (int i = 0; i < m; ++i) {
+    const auto row_i = static_cast<std::size_t>(i);
 
-#pragma omp for schedule(static)
-    for (int i = 0; i < m; ++i) {
-      AccumulateRowProducts(i, row_vals, row_mark, used_cols);
+    c_.values.insert(c_.values.end(), row_values[row_i].begin(), row_values[row_i].end());
 
-      std::sort(used_cols.begin(), used_cols.end());
-
-      int write_pos = c_.row_ptr[static_cast<std::size_t>(i)];
-      for (int col : used_cols) {
-        const auto value = row_vals[static_cast<std::size_t>(col)];
-        if (value == std::complex<double>(0.0, 0.0)) {
-          continue;
-        }
-        c_.col_index[static_cast<std::size_t>(write_pos)] = col;
-        c_.values[static_cast<std::size_t>(write_pos)] = value;
-        ++write_pos;
-      }
-    }
+    c_.col_index.insert(c_.col_index.end(), row_cols[row_i].begin(), row_cols[row_i].end());
   }
 
   return true;
