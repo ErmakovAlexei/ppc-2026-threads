@@ -158,6 +158,10 @@ void ErmakovASparMatMultOMP::AccumulateRowProducts(int row_index, std::vector<st
   }
 }
 
+void ermakov_a_spar_mat_mult::ErmakovASparMatMultOMP::SortUsedCols(std::vector<int> &used_cols) {
+  std::ranges::sort(used_cols);
+}
+
 void ErmakovASparMatMultOMP::CollectRowValues(const std::vector<std::complex<double>> &row_vals,
                                               const std::vector<int> &used_cols, std::vector<int> &cols,
                                               std::vector<std::complex<double>> &vals) {
