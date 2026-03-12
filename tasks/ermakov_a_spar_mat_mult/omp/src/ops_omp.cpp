@@ -151,7 +151,7 @@ bool ErmakovASparMatMultOMP::RunImpl() {
   std::vector<std::vector<std::complex<double>>> row_values(static_cast<std::size_t>(m));
   std::vector<std::vector<int>> row_cols(static_cast<std::size_t>(m));
 
-#pragma omp parallel default(none) shared(m, p, row_values, row_cols, this)
+#pragma omp parallel default(none) shared(m, p, row_values, row_cols)
   {
     std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
 
