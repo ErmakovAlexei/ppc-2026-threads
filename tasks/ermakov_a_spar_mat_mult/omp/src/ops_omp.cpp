@@ -128,6 +128,35 @@ void ErmakovASparMatMultOMP::ProcessRow(int i, std::vector<std::complex<double>>
   }
 }
 
+void ErmakovASparMatMultOMP::AccumulateRowProducts(int row_index, std::vector<std::complex<double>> &row_vals,
+                                                   std::vector<int> &row_mark, std::vector<int> &used_cols) {
+  used_cols.clear();
+
+  const int a_start = a_.row_ptr[row_index];
+  const int a_end = a_.row_ptr[row_index + 1];
+
+  for (int ak = a_start; ak < a_end; ++ak) {
+    const int j = a_.col_index[static_cast<std::size_t>(ak)];
+    const auto a_ij = a_.values[static_cast<std::size_t>(ak)];
+
+    const int b_start = b_.row_ptr[j];
+    const int b_end = b_.row_ptr[j + 1];
+
+    for (int bk = b_start; bk < b_end; ++bk) {
+      const int k = b_.col_index[static_cast<std::size_t>(bk)];
+      const auto b_jk = b_.values[static_cast<std::size_t>(bk)];
+
+      if (row_mark[static_cast<std::size_t>(k)] != row_index) {
+        row_mark[static_cast<std::size_t>(k)] = row_index;
+        row_vals[static_cast<std::size_t>(k)] = a_ij * b_jk;
+        used_cols.push_back(k);
+      } else {
+        row_vals[static_cast<std::size_t>(k)] += a_ij * b_jk;
+      }
+    }
+  }
+}
+
 bool ErmakovASparMatMultOMP::RunImpl() {
   const int m = a_.rows;
   const int p = b_.cols;
@@ -144,7 +173,6 @@ bool ErmakovASparMatMultOMP::RunImpl() {
     return true;
   }
 
-  // ---------- 1. Первый проход: считаем nnz_per_row ----------
   std::vector<int> nnz_per_row(static_cast<std::size_t>(m), 0);
 
 #pragma omp parallel default(none) shared(nnz_per_row, m, p)
@@ -156,35 +184,11 @@ bool ErmakovASparMatMultOMP::RunImpl() {
 
 #pragma omp for schedule(static)
     for (int i = 0; i < m; ++i) {
-      used_cols.clear();
-
-      const int a_start = a_.row_ptr[i];
-      const int a_end = a_.row_ptr[i + 1];
-
-      for (int ak = a_start; ak < a_end; ++ak) {
-        const int j = a_.col_index[static_cast<std::size_t>(ak)];
-        const auto a_ij = a_.values[static_cast<std::size_t>(ak)];
-
-        const int b_start = b_.row_ptr[j];
-        const int b_end = b_.row_ptr[j + 1];
-
-        for (int bk = b_start; bk < b_end; ++bk) {
-          const int k = b_.col_index[static_cast<std::size_t>(bk)];
-          const auto b_jk = b_.values[static_cast<std::size_t>(bk)];
-
-          if (row_mark[static_cast<std::size_t>(k)] != i) {
-            row_mark[static_cast<std::size_t>(k)] = i;
-            row_vals[static_cast<std::size_t>(k)] = a_ij * b_jk;
-            used_cols.push_back(k);
-          } else {
-            row_vals[static_cast<std::size_t>(k)] += a_ij * b_jk;
-          }
-        }
-      }
+      AccumulateRowProducts(i, row_vals, row_mark, used_cols);
 
       int count = 0;
-      for (int k : used_cols) {
-        if (row_vals[static_cast<std::size_t>(k)] != std::complex<double>(0.0, 0.0)) {
+      for (int col : used_cols) {
+        if (row_vals[static_cast<std::size_t>(col)] != std::complex<double>(0.0, 0.0)) {
           ++count;
         }
       }
@@ -192,7 +196,6 @@ bool ErmakovASparMatMultOMP::RunImpl() {
     }
   }
 
-  // ---------- 2. Префикс-сумма: row_ptr и общий nnz ----------
   int nnz = 0;
   for (int i = 0; i < m; ++i) {
     c_.row_ptr[static_cast<std::size_t>(i)] = nnz;
@@ -203,7 +206,6 @@ bool ErmakovASparMatMultOMP::RunImpl() {
   c_.values.resize(static_cast<std::size_t>(nnz));
   c_.col_index.resize(static_cast<std::size_t>(nnz));
 
-  // ---------- 3. Второй проход: реальная запись в c_ ----------
 #pragma omp parallel default(none) shared(m, p)
   {
     std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
@@ -213,42 +215,18 @@ bool ErmakovASparMatMultOMP::RunImpl() {
 
 #pragma omp for schedule(static)
     for (int i = 0; i < m; ++i) {
-      used_cols.clear();
+      AccumulateRowProducts(i, row_vals, row_mark, used_cols);
 
-      const int a_start = a_.row_ptr[i];
-      const int a_end = a_.row_ptr[i + 1];
-
-      for (int ak = a_start; ak < a_end; ++ak) {
-        const int j = a_.col_index[static_cast<std::size_t>(ak)];
-        const auto a_ij = a_.values[static_cast<std::size_t>(ak)];
-
-        const int b_start = b_.row_ptr[j];
-        const int b_end = b_.row_ptr[j + 1];
-
-        for (int bk = b_start; bk < b_end; ++bk) {
-          const int k = b_.col_index[static_cast<std::size_t>(bk)];
-          const auto b_jk = b_.values[static_cast<std::size_t>(bk)];
-
-          if (row_mark[static_cast<std::size_t>(k)] != i) {
-            row_mark[static_cast<std::size_t>(k)] = i;
-            row_vals[static_cast<std::size_t>(k)] = a_ij * b_jk;
-            used_cols.push_back(k);
-          } else {
-            row_vals[static_cast<std::size_t>(k)] += a_ij * b_jk;
-          }
-        }
-      }
-
-      std::sort(used_cols.begin(), used_cols.end());
+      std::ranges::sort(used_cols);
 
       int write_pos = c_.row_ptr[static_cast<std::size_t>(i)];
-      for (int k : used_cols) {
-        const auto v = row_vals[static_cast<std::size_t>(k)];
-        if (v == std::complex<double>(0.0, 0.0)) {
+      for (int col : used_cols) {
+        const auto value = row_vals[static_cast<std::size_t>(col)];
+        if (value == std::complex<double>(0.0, 0.0)) {
           continue;
         }
-        c_.col_index[static_cast<std::size_t>(write_pos)] = k;
-        c_.values[static_cast<std::size_t>(write_pos)] = v;
+        c_.col_index[static_cast<std::size_t>(write_pos)] = col;
+        c_.values[static_cast<std::size_t>(write_pos)] = value;
         ++write_pos;
       }
     }
