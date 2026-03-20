@@ -207,8 +207,8 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(binary_, height_, labels_flat_, parent_, stripe_count_, stripe_offsets_, \
-                                                stripe_used_counts_, width_) schedule(static)
+#  pragma omp parallel for default(none) shared(binary_, height_, labels_flat_, parent_, stripe_count_, \
+                                                    stripe_offsets_, stripe_used_counts_, width_) schedule(static)
 #endif
   for (int stripe = 0; stripe < stripe_count_; ++stripe) {
     const StripeRange stripe_range = GetStripeRange(stripe, height_, stripe_count_, stripe_offsets_);
