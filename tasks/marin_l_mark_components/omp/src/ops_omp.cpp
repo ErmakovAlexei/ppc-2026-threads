@@ -188,7 +188,7 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
 
 bool MarinLMarkComponentsOMP::RunImpl() {
   FirstPassOMP();
-  MergeStripeBorders();  // Используем для resolve границ блоков
+  MergeStripeBorders();
   SecondPassOMP();
   return true;
 }
