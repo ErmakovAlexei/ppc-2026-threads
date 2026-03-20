@@ -173,7 +173,7 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this, input_binary) schedule(static)
+#  pragma omp parallel for default(none) shared(binary_, height_, input_binary, width_) schedule(static)
 #endif
   for (int row = 0; row < height_; ++row) {
     const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
@@ -198,7 +198,7 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this, labels_count) schedule(static)
+#  pragma omp parallel for default(none) shared(labels_count, labels_flat_) schedule(static)
 #endif
   for (std::ptrdiff_t i = 0; i < labels_count; ++i) {
     labels_flat_[static_cast<std::size_t>(i)] = 0;
@@ -207,7 +207,8 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this) schedule(static)
+#  pragma omp parallel for default(none) shared(binary_, height_, labels_flat_, parent_, stripe_count_, stripe_offsets_, \
+                                                stripe_used_counts_, width_) schedule(static)
 #endif
   for (int stripe = 0; stripe < stripe_count_; ++stripe) {
     const StripeRange stripe_range = GetStripeRange(stripe, height_, stripe_count_, stripe_offsets_);
@@ -236,7 +237,8 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this) schedule(static)
+#  pragma omp parallel for default(none) shared(parent_, stripe_count_, stripe_offsets_, stripe_used_counts_) \
+      schedule(static)
 #endif
   for (int stripe = 0; stripe < stripe_count_; ++stripe) {
     const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
@@ -280,7 +282,7 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this, pixels_count) schedule(static)
+#  pragma omp parallel for default(none) shared(labels_flat_, parent_, pixels_count, root_to_compact_) schedule(static)
 #endif
   for (int64_t idx = 0; idx < pixels_count; ++idx) {
     const int label = labels_flat_[static_cast<std::size_t>(idx)];
@@ -308,7 +310,7 @@ void MarinLMarkComponentsOMP::ConvertLabelsToOutput() {
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
-#  pragma omp parallel for default(none) shared(this) schedule(static)
+#  pragma omp parallel for default(none) shared(height_, labels_, labels_flat_, width_) schedule(static)
 #endif
   for (int row = 0; row < height_; ++row) {
     labels_[static_cast<std::size_t>(row)].resize(static_cast<std::size_t>(width_));
