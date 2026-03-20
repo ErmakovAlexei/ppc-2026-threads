@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <numeric>
-#include <ranges>
 #include <vector>
 
 #include "marin_l_mark_components/common/include/common.hpp"
@@ -278,7 +277,7 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
   }
 
   const std::size_t pixels = static_cast<std::size_t>(height_) * static_cast<std::size_t>(width_);
-  const int64_t pixels_count = static_cast<int64_t>(pixels);
+  const auto pixels_count = static_cast<int64_t>(pixels);
 #ifdef _MSC_VER
 #  pragma omp parallel for schedule(static)
 #else
