@@ -116,7 +116,7 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
     }
   }
   std::partial_sum(block_offsets.begin(), block_offsets.end(), block_offsets.begin());
-  max_label_id_ = block_offsets.back();
+  max_label_id_ = (num_blocks > 0) ? block_offsets[static_cast<std::size_t>(num_blocks)] : 0;
 
 #pragma omp parallel for schedule(static)
   for (int i = 0; i <= max_label_id_; ++i) {
