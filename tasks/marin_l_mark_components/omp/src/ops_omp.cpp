@@ -89,7 +89,23 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
   labels_flat_.assign(static_cast<std::size_t>(pixels), 0);
   labels_.clear();
   parent_.assign(static_cast<std::size_t>(pixels) + 1ULL, 0);
+  root_to_compact_.assign(static_cast<std::size_t>(pixels) + 1ULL, 0);
+  root_generation_.assign(static_cast<std::size_t>(pixels) + 1ULL, 0);
   max_label_id_ = 0;
+  generation_id_ = 1;
+
+  stripe_count_ = std::max(1, omp_get_max_threads());
+  stripe_count_ = std::min(stripe_count_, height_);
+  stripe_count_ = std::min(stripe_count_, std::max(1, height_ / kMinRowsPerStripe));
+  stripe_offsets_.assign(static_cast<std::size_t>(stripe_count_) + 1ULL, 0);
+  stripe_used_counts_.assign(static_cast<std::size_t>(stripe_count_), 0);
+  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
+    const int row_start = (stripe * height_) / stripe_count_;
+    const int row_end = ((stripe + 1) * height_) / stripe_count_;
+    stripe_offsets_[static_cast<std::size_t>(stripe) + 1ULL] = (row_end - row_start) * width_;
+  }
+  std::partial_sum(stripe_offsets_.begin(), stripe_offsets_.end(), stripe_offsets_.begin());
+  max_label_id_ = stripe_offsets_[static_cast<std::size_t>(stripe_count_)];
 
 #pragma omp parallel for schedule(static)
   for (int row = 0; row < height_; ++row) {
@@ -111,29 +127,17 @@ bool MarinLMarkComponentsOMP::RunImpl() {
 }
 
 void MarinLMarkComponentsOMP::FirstPassOMP() {
-  stripe_count_ = std::max(1, omp_get_max_threads());
-  stripe_count_ = std::min(stripe_count_, height_);
-  stripe_count_ = std::min(stripe_count_, std::max(1, height_ / kMinRowsPerStripe));
-
-  std::vector<int> stripe_offsets(static_cast<std::size_t>(stripe_count_) + 1ULL, 0);
-  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
-    const int row_start = (stripe * height_) / stripe_count_;
-    const int row_end = ((stripe + 1) * height_) / stripe_count_;
-    stripe_offsets[static_cast<std::size_t>(stripe) + 1ULL] = (row_end - row_start) * width_;
-  }
-  std::partial_sum(stripe_offsets.begin(), stripe_offsets.end(), stripe_offsets.begin());
-  max_label_id_ = stripe_offsets[static_cast<std::size_t>(stripe_count_)];
-
 #pragma omp parallel for schedule(static)
-  for (int i = 0; i <= max_label_id_; ++i) {
-    parent_[static_cast<std::size_t>(i)] = i;
+  for (int i = 0; i < static_cast<int>(labels_flat_.size()); ++i) {
+    labels_flat_[static_cast<std::size_t>(i)] = 0;
   }
 
 #pragma omp parallel for schedule(static)
   for (int stripe = 0; stripe < stripe_count_; ++stripe) {
     const int row_start = (stripe * height_) / stripe_count_;
     const int row_end = ((stripe + 1) * height_) / stripe_count_;
-    int next_label = 1 + stripe_offsets[static_cast<std::size_t>(stripe)];
+    const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
+    int next_label = base_label;
 
     for (int row = row_start; row < row_end; ++row) {
       const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
@@ -150,6 +154,7 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
         const int top_label = has_top ? labels_flat_[top_row_offset + static_cast<std::size_t>(col)] : 0;
 
         if (left_label == 0 && top_label == 0) {
+          parent_[static_cast<std::size_t>(next_label)] = next_label;
           labels_flat_[idx] = next_label++;
         } else if (left_label != 0 && top_label == 0) {
           labels_flat_[idx] = left_label;
@@ -164,6 +169,8 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
         }
       }
     }
+
+    stripe_used_counts_[static_cast<std::size_t>(stripe)] = next_label - base_label;
   }
 }
 
@@ -186,8 +193,12 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
   }
 
 #pragma omp parallel for schedule(static)
-  for (int label = 1; label <= max_label_id_; ++label) {
-    parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
+  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
+    const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
+    const int used_count = stripe_used_counts_[static_cast<std::size_t>(stripe)];
+    for (int label = base_label; label < base_label + used_count; ++label) {
+      parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
+    }
   }
 }
 
@@ -200,20 +211,35 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
     return;
   }
 
-  std::vector<int> root_to_compact(static_cast<std::size_t>(max_label_id_ + 1), 0);
+  ++generation_id_;
+  if (generation_id_ == 0) {
+    generation_id_ = 1;
+    std::fill(root_generation_.begin(), root_generation_.end(), 0);
+  }
+
   int next_id = 1;
+  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
+    const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
+    const int used_count = stripe_used_counts_[static_cast<std::size_t>(stripe)];
+    for (int label = base_label; label < base_label + used_count; ++label) {
+      const int root = parent_[static_cast<std::size_t>(label)];
+      if (root_generation_[static_cast<std::size_t>(root)] != generation_id_) {
+        root_generation_[static_cast<std::size_t>(root)] = generation_id_;
+        root_to_compact_[static_cast<std::size_t>(root)] = next_id++;
+      }
+    }
+  }
+
   const std::size_t pixels = static_cast<std::size_t>(height_) * static_cast<std::size_t>(width_);
-  for (std::size_t idx = 0; idx < pixels; ++idx) {
-    const int label = labels_flat_[idx];
+#pragma omp parallel for schedule(static)
+  for (int64_t idx = 0; idx < static_cast<int64_t>(pixels); ++idx) {
+    const int label = labels_flat_[static_cast<std::size_t>(idx)];
     if (label == 0) {
       continue;
     }
 
     const int root = parent_[static_cast<std::size_t>(label)];
-    if (root_to_compact[static_cast<std::size_t>(root)] == 0) {
-      root_to_compact[static_cast<std::size_t>(root)] = next_id++;
-    }
-    labels_flat_[idx] = root_to_compact[static_cast<std::size_t>(root)];
+    labels_flat_[static_cast<std::size_t>(idx)] = root_to_compact_[static_cast<std::size_t>(root)];
   }
 }
 
