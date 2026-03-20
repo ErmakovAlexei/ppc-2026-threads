@@ -15,7 +15,7 @@ namespace marin_l_mark_components {
 namespace {
 
 constexpr std::uint64_t kMaxPixels = 100000000ULL;
-constexpr int kBlockSize = 64;
+constexpr int kMinRowsPerStripe = 64;
 
 int FindRoot(std::vector<int> &parent, int x) {
   while (parent[x] != x) {
@@ -72,22 +72,33 @@ bool MarinLMarkComponentsOMP::ValidationImpl() {
 }
 
 bool MarinLMarkComponentsOMP::PreProcessingImpl() {
-  binary_ = GetInput().binary;
-  const int height = static_cast<int>(binary_.size());
-  const int width = static_cast<int>(binary_.front().size());
+  const auto &input_binary = GetInput().binary;
+  height_ = static_cast<int>(input_binary.size());
+  width_ = static_cast<int>(input_binary.front().size());
 
-  if (height <= 0 || width <= 0) {
+  if (height_ <= 0 || width_ <= 0) {
     return false;
   }
 
-  const std::uint64_t pixels = static_cast<std::uint64_t>(height) * static_cast<std::uint64_t>(width);
+  const std::uint64_t pixels = static_cast<std::uint64_t>(height_) * static_cast<std::uint64_t>(width_);
   if (pixels > kMaxPixels) {
     return false;
   }
 
-  labels_.assign(static_cast<std::size_t>(height), std::vector<int>(static_cast<std::size_t>(width), 0));
-  parent_.assign(static_cast<std::size_t>(height * width) + 1ULL, 0);
+  binary_.assign(static_cast<std::size_t>(pixels), 0);
+  labels_flat_.assign(static_cast<std::size_t>(pixels), 0);
+  labels_.clear();
+  parent_.assign(static_cast<std::size_t>(pixels) + 1ULL, 0);
   max_label_id_ = 0;
+
+#pragma omp parallel for schedule(static)
+  for (int row = 0; row < height_; ++row) {
+    const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+    for (int col = 0; col < width_; ++col) {
+      binary_[row_offset + static_cast<std::size_t>(col)] =
+          static_cast<std::uint8_t>(input_binary[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]);
+    }
+  }
 
   return true;
 }
@@ -100,127 +111,80 @@ bool MarinLMarkComponentsOMP::RunImpl() {
 }
 
 void MarinLMarkComponentsOMP::FirstPassOMP() {
-  const int height = static_cast<int>(binary_.size());
-  const int width = static_cast<int>(binary_.front().size());
-  const int num_blocks_h = (height + kBlockSize - 1) / kBlockSize;
-  const int num_blocks_w = (width + kBlockSize - 1) / kBlockSize;
-  const int num_blocks = num_blocks_h * num_blocks_w;
-  std::vector<int> block_offsets(static_cast<std::size_t>(num_blocks) + 1ULL, 0);
+  stripe_count_ = std::max(1, omp_get_max_threads());
+  stripe_count_ = std::min(stripe_count_, height_);
+  stripe_count_ = std::min(stripe_count_, std::max(1, height_ / kMinRowsPerStripe));
 
-  for (int bh = 0; bh < num_blocks_h; ++bh) {
-    for (int bw = 0; bw < num_blocks_w; ++bw) {
-      const int block_id = (bh * num_blocks_w) + bw;
-      const int block_height = std::min(kBlockSize, height - (bh * kBlockSize));
-      const int block_width = std::min(kBlockSize, width - (bw * kBlockSize));
-      block_offsets[static_cast<std::size_t>(block_id) + 1ULL] = block_height * block_width;
-    }
+  std::vector<int> stripe_offsets(static_cast<std::size_t>(stripe_count_) + 1ULL, 0);
+  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
+    const int row_start = (stripe * height_) / stripe_count_;
+    const int row_end = ((stripe + 1) * height_) / stripe_count_;
+    stripe_offsets[static_cast<std::size_t>(stripe) + 1ULL] = (row_end - row_start) * width_;
   }
-  std::partial_sum(block_offsets.begin(), block_offsets.end(), block_offsets.begin());
-  max_label_id_ = (num_blocks > 0) ? block_offsets[static_cast<std::size_t>(num_blocks)] : 0;
+  std::partial_sum(stripe_offsets.begin(), stripe_offsets.end(), stripe_offsets.begin());
+  max_label_id_ = stripe_offsets[static_cast<std::size_t>(stripe_count_)];
 
 #pragma omp parallel for schedule(static)
   for (int i = 0; i <= max_label_id_; ++i) {
     parent_[static_cast<std::size_t>(i)] = i;
   }
 
-#pragma omp parallel for collapse(2) schedule(static)
-  for (int bh = 0; bh < num_blocks_h; ++bh) {
-    for (int bw = 0; bw < num_blocks_w; ++bw) {
-      const int row_start = bh * kBlockSize;
-      const int row_end = std::min(row_start + kBlockSize, height);
-      const int col_start = bw * kBlockSize;
-      const int col_end = std::min(col_start + kBlockSize, width);
-      const int block_id = (bh * num_blocks_w) + bw;
-      const int base_label = 1 + block_offsets[static_cast<std::size_t>(block_id)];
-      const int block_capacity =
-          block_offsets[static_cast<std::size_t>(block_id) + 1ULL] - block_offsets[static_cast<std::size_t>(block_id)];
-      int next_label = base_label;
+#pragma omp parallel for schedule(static)
+  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
+    const int row_start = (stripe * height_) / stripe_count_;
+    const int row_end = ((stripe + 1) * height_) / stripe_count_;
+    int next_label = 1 + stripe_offsets[static_cast<std::size_t>(stripe)];
 
-      for (int row = row_start; row < row_end; ++row) {
-        for (int col = col_start; col < col_end; ++col) {
-          if (binary_[row][col] == 0) {
-            continue;
-          }
+    for (int row = row_start; row < row_end; ++row) {
+      const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+      const bool has_top = row > row_start;
+      const std::size_t top_row_offset = has_top ? row_offset - static_cast<std::size_t>(width_) : 0;
 
-          int left_label = 0;
-          int top_label = 0;
-          if (col > col_start) {
-            left_label = labels_[row][col - 1];
-          }
-          if (row > row_start) {
-            top_label = labels_[row - 1][col];
-          }
+      for (int col = 0; col < width_; ++col) {
+        const std::size_t idx = row_offset + static_cast<std::size_t>(col);
+        if (binary_[idx] == 0) {
+          continue;
+        }
 
-          if (left_label == 0 && top_label == 0) {
-            if (next_label < base_label + block_capacity) {
-              labels_[row][col] = next_label;
-              ++next_label;
-            }
-          } else if (left_label != 0 && top_label == 0) {
-            labels_[row][col] = left_label;
-          } else if (left_label == 0 && top_label != 0) {
-            labels_[row][col] = top_label;
-          } else {
-            const int min_label = std::min(left_label, top_label);
-            labels_[row][col] = min_label;
-            if (left_label != top_label) {
-              UnionLabels(parent_, left_label, top_label);
-            }
+        const int left_label = (col > 0) ? labels_flat_[idx - 1ULL] : 0;
+        const int top_label = has_top ? labels_flat_[top_row_offset + static_cast<std::size_t>(col)] : 0;
+
+        if (left_label == 0 && top_label == 0) {
+          labels_flat_[idx] = next_label++;
+        } else if (left_label != 0 && top_label == 0) {
+          labels_flat_[idx] = left_label;
+        } else if (left_label == 0 && top_label != 0) {
+          labels_flat_[idx] = top_label;
+        } else {
+          const int min_label = std::min(left_label, top_label);
+          labels_flat_[idx] = min_label;
+          if (left_label != top_label) {
+            UnionLabels(parent_, left_label, top_label);
           }
         }
       }
     }
-  }
-
-#pragma omp parallel for schedule(static)
-  for (int label = 1; label <= max_label_id_; ++label) {
-    parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
   }
 }
 
 void MarinLMarkComponentsOMP::MergeStripeBorders() {
-  const int height = static_cast<int>(binary_.size());
-  const int width = static_cast<int>(binary_.front().size());
-  const int num_blocks_h = (height + kBlockSize - 1) / kBlockSize;
-  const int num_blocks_w = (width + kBlockSize - 1) / kBlockSize;
-
-  // Resolve горизонтальных границ блоков
-  for (int bh = 0; bh < num_blocks_h - 1; ++bh) {
-    const int border_row = (bh + 1) * kBlockSize;
-    if (border_row >= height) {
-      continue;
-    }
-
-    for (int col = 0; col < width; ++col) {
-      if (binary_[border_row - 1][col] && binary_[border_row][col]) {
-        int l1 = labels_[border_row - 1][col];
-        int l2 = labels_[border_row][col];
-        if (l1 > 0 && l2 > 0 && l1 != l2) {
-          UnionLabels(parent_, l1, l2);
+  for (int stripe = 0; stripe < stripe_count_ - 1; ++stripe) {
+    const int border_row = ((stripe + 1) * height_) / stripe_count_;
+    const std::size_t top_row_offset = static_cast<std::size_t>(border_row - 1) * static_cast<std::size_t>(width_);
+    const std::size_t bottom_row_offset = static_cast<std::size_t>(border_row) * static_cast<std::size_t>(width_);
+    for (int col = 0; col < width_; ++col) {
+      const std::size_t top_idx = top_row_offset + static_cast<std::size_t>(col);
+      const std::size_t bottom_idx = bottom_row_offset + static_cast<std::size_t>(col);
+      if (binary_[top_idx] && binary_[bottom_idx]) {
+        const int top_label = labels_flat_[top_idx];
+        const int bottom_label = labels_flat_[bottom_idx];
+        if (top_label > 0 && bottom_label > 0 && top_label != bottom_label) {
+          UnionLabels(parent_, top_label, bottom_label);
         }
       }
     }
   }
 
-  // Resolve вертикальных границ блоков
-  for (int bw = 0; bw < num_blocks_w - 1; ++bw) {
-    const int border_col = (bw + 1) * kBlockSize;
-    if (border_col >= width) {
-      continue;
-    }
-
-    for (int row = 0; row < height; ++row) {
-      if (binary_[row][border_col - 1] && binary_[row][border_col]) {
-        int l1 = labels_[row][border_col - 1];
-        int l2 = labels_[row][border_col];
-        if (l1 > 0 && l2 > 0 && l1 != l2) {
-          UnionLabels(parent_, l1, l2);
-        }
-      }
-    }
-  }
-
-  // Финальное сжатие путей
 #pragma omp parallel for schedule(static)
   for (int label = 1; label <= max_label_id_; ++label) {
     parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
@@ -228,58 +192,50 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
 }
 
 void MarinLMarkComponentsOMP::SecondPassOMP() {
-  const int height = static_cast<int>(labels_.size());
-  const int width = height > 0 ? static_cast<int>(labels_.front().size()) : 0;
-
-  if (height == 0 || width == 0) {
+  if (height_ == 0 || width_ == 0) {
     return;
   }
 
-  int max_label = 0;
-#pragma omp parallel for reduction(max : max_label) schedule(static, 256)
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      max_label = std::max(max_label, labels_[i][j]);
-    }
-  }
-
-  if (max_label == 0) {
+  if (max_label_id_ == 0) {
     return;
   }
 
-  // Параллельная замена на корни
-#pragma omp parallel for schedule(static, 256)
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      int label = labels_[i][j];
-      if (label != 0) {
-        labels_[i][j] = FindRoot(parent_, label);
-      }
-    }
-  }
-
-  // Компактация (однопоточная)
-  std::vector<int> root_to_compact(static_cast<std::size_t>(max_label + 1), 0);
+  std::vector<int> root_to_compact(static_cast<std::size_t>(max_label_id_ + 1), 0);
   int next_id = 1;
-  for (int i = 0; i < height; ++i) {
-    for (int j = 0; j < width; ++j) {
-      int root = labels_[i][j];
-      if (root == 0) {
-        continue;
-      }
-      if (root_to_compact[static_cast<std::size_t>(root)] == 0) {
-        root_to_compact[static_cast<std::size_t>(root)] = next_id++;
-      }
-      labels_[i][j] = root_to_compact[static_cast<std::size_t>(root)];
+  const std::size_t pixels = static_cast<std::size_t>(height_) * static_cast<std::size_t>(width_);
+  for (std::size_t idx = 0; idx < pixels; ++idx) {
+    const int label = labels_flat_[idx];
+    if (label == 0) {
+      continue;
     }
+
+    const int root = parent_[static_cast<std::size_t>(label)];
+    if (root_to_compact[static_cast<std::size_t>(root)] == 0) {
+      root_to_compact[static_cast<std::size_t>(root)] = next_id++;
+    }
+    labels_flat_[idx] = root_to_compact[static_cast<std::size_t>(root)];
   }
 }
 
 bool MarinLMarkComponentsOMP::PostProcessingImpl() {
+  ConvertLabelsToOutput();
   OutType out;
   out.labels = labels_;
   GetOutput() = out;
   return true;
+}
+
+void MarinLMarkComponentsOMP::ConvertLabelsToOutput() {
+  labels_.assign(static_cast<std::size_t>(height_), std::vector<int>(static_cast<std::size_t>(width_), 0));
+
+#pragma omp parallel for schedule(static)
+  for (int row = 0; row < height_; ++row) {
+    const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+    for (int col = 0; col < width_; ++col) {
+      labels_[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)] =
+          labels_flat_[row_offset + static_cast<std::size_t>(col)];
+    }
+  }
 }
 
 }  // namespace marin_l_mark_components
