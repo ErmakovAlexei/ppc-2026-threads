@@ -30,6 +30,7 @@ class MarinLMarkComponentsOMP : public BaseTask {
   Image binary_;
   Labels labels_;
   std::vector<int> parent_;
+  int max_label_id_ = 0;
 };
 
 }  // namespace marin_l_mark_components

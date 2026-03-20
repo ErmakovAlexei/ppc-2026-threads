@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <numeric>
 #include <vector>
 
 #include "marin_l_mark_components/common/include/common.hpp"
@@ -86,6 +87,7 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
 
   labels_.assign(static_cast<std::size_t>(height), std::vector<int>(static_cast<std::size_t>(width), 0));
   parent_.assign(static_cast<std::size_t>(height * width) + 1ULL, 0);
+  max_label_id_ = 0;
 
   return true;
 }
@@ -100,62 +102,69 @@ bool MarinLMarkComponentsOMP::RunImpl() {
 void MarinLMarkComponentsOMP::FirstPassOMP() {
   const int height = static_cast<int>(binary_.size());
   const int width = static_cast<int>(binary_.front().size());
-  const int max_labels = height * width;
+  const int num_blocks_h = (height + kBlockSize - 1) / kBlockSize;
+  const int num_blocks_w = (width + kBlockSize - 1) / kBlockSize;
+  const int num_blocks = num_blocks_h * num_blocks_w;
+  std::vector<int> block_offsets(static_cast<std::size_t>(num_blocks) + 1ULL, 0);
 
-  // Инициализация parent
-  for (int i = 0; i <= max_labels; ++i) {
+  for (int bh = 0; bh < num_blocks_h; ++bh) {
+    for (int bw = 0; bw < num_blocks_w; ++bw) {
+      const int block_id = (bh * num_blocks_w) + bw;
+      const int block_height = std::min(kBlockSize, height - (bh * kBlockSize));
+      const int block_width = std::min(kBlockSize, width - (bw * kBlockSize));
+      block_offsets[static_cast<std::size_t>(block_id) + 1ULL] = block_height * block_width;
+    }
+  }
+  std::partial_sum(block_offsets.begin(), block_offsets.end(), block_offsets.begin());
+  max_label_id_ = block_offsets.back();
+
+#pragma omp parallel for schedule(static)
+  for (int i = 0; i <= max_label_id_; ++i) {
     parent_[static_cast<std::size_t>(i)] = i;
   }
 
-  const int num_blocks_h = (height + kBlockSize - 1) / kBlockSize;
-  const int num_blocks_w = (width + kBlockSize - 1) / kBlockSize;
-  const int labels_per_block = kBlockSize * kBlockSize;
+#pragma omp parallel for collapse(2) schedule(static)
+  for (int bh = 0; bh < num_blocks_h; ++bh) {
+    for (int bw = 0; bw < num_blocks_w; ++bw) {
+      const int row_start = bh * kBlockSize;
+      const int row_end = std::min(row_start + kBlockSize, height);
+      const int col_start = bw * kBlockSize;
+      const int col_end = std::min(col_start + kBlockSize, width);
+      const int block_id = (bh * num_blocks_w) + bw;
+      const int base_label = 1 + block_offsets[static_cast<std::size_t>(block_id)];
+      const int block_capacity =
+          block_offsets[static_cast<std::size_t>(block_id) + 1ULL] - block_offsets[static_cast<std::size_t>(block_id)];
+      int next_label = base_label;
 
-#pragma omp parallel num_threads(std::min(12, omp_get_max_threads()))
-  {
-#pragma omp for collapse(2) schedule(static)
-    for (int bh = 0; bh < num_blocks_h; ++bh) {
-      for (int bw = 0; bw < num_blocks_w; ++bw) {
-        const int row_start = bh * kBlockSize;
-        const int row_end = std::min(row_start + kBlockSize, height);
-        const int col_start = bw * kBlockSize;
-        const int col_end = std::min(col_start + kBlockSize, width);
+      for (int row = row_start; row < row_end; ++row) {
+        for (int col = col_start; col < col_end; ++col) {
+          if (binary_[row][col] == 0) {
+            continue;
+          }
 
-        // Уникальный диапазон меток для блока
-        const int base_label = 1 + (bh * num_blocks_w + bw) * labels_per_block;
-        int next_label = base_label;
+          int left_label = 0;
+          int top_label = 0;
+          if (col > col_start) {
+            left_label = labels_[row][col - 1];
+          }
+          if (row > row_start) {
+            top_label = labels_[row - 1][col];
+          }
 
-        // Последовательный CCL внутри блока
-        for (int row = row_start; row < row_end; ++row) {
-          for (int col = col_start; col < col_end; ++col) {
-            if (binary_[row][col] == 0) {
-              continue;
+          if (left_label == 0 && top_label == 0) {
+            if (next_label < base_label + block_capacity) {
+              labels_[row][col] = next_label;
+              ++next_label;
             }
-
-            int left_label = 0, top_label = 0;
-            if (col > col_start) {
-              left_label = labels_[row][col - 1];
-            }
-            if (row > row_start) {
-              top_label = labels_[row - 1][col];
-            }
-
-            if (left_label == 0 && top_label == 0) {
-              if (next_label < base_label + labels_per_block) {
-                labels_[row][col] = next_label;
-                parent_[static_cast<std::size_t>(next_label)] = next_label;
-                ++next_label;
-              }
-            } else if (left_label != 0 && top_label == 0) {
-              labels_[row][col] = left_label;
-            } else if (left_label == 0 && top_label != 0) {
-              labels_[row][col] = top_label;
-            } else {
-              const int min_label = std::min(left_label, top_label);
-              labels_[row][col] = min_label;
-              if (left_label != top_label) {
-                UnionLabels(parent_, left_label, top_label);
-              }
+          } else if (left_label != 0 && top_label == 0) {
+            labels_[row][col] = left_label;
+          } else if (left_label == 0 && top_label != 0) {
+            labels_[row][col] = top_label;
+          } else {
+            const int min_label = std::min(left_label, top_label);
+            labels_[row][col] = min_label;
+            if (left_label != top_label) {
+              UnionLabels(parent_, left_label, top_label);
             }
           }
         }
@@ -163,9 +172,8 @@ void MarinLMarkComponentsOMP::FirstPassOMP() {
     }
   }
 
-  // Предварительное сжатие путей
 #pragma omp parallel for schedule(static)
-  for (int label = 1; label <= max_labels; ++label) {
+  for (int label = 1; label <= max_label_id_; ++label) {
     parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
   }
 }
@@ -177,7 +185,6 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
   const int num_blocks_w = (width + kBlockSize - 1) / kBlockSize;
 
   // Resolve горизонтальных границ блоков
-#pragma omp parallel for schedule(static)
   for (int bh = 0; bh < num_blocks_h - 1; ++bh) {
     const int border_row = (bh + 1) * kBlockSize;
     if (border_row >= height) {
@@ -196,7 +203,6 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
   }
 
   // Resolve вертикальных границ блоков
-#pragma omp parallel for schedule(static)
   for (int bw = 0; bw < num_blocks_w - 1; ++bw) {
     const int border_col = (bw + 1) * kBlockSize;
     if (border_col >= width) {
@@ -215,9 +221,8 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
   }
 
   // Финальное сжатие путей
-  const int max_labels = height * width;
 #pragma omp parallel for schedule(static)
-  for (int label = 1; label <= max_labels; ++label) {
+  for (int label = 1; label <= max_label_id_; ++label) {
     parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
   }
 }
@@ -243,7 +248,7 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
   }
 
   // Параллельная замена на корни
-#pragma omp parallel for schedule(static, 256) num_threads(8)
+#pragma omp parallel for schedule(static, 256)
   for (int i = 0; i < height; ++i) {
     for (int j = 0; j < width; ++j) {
       int label = labels_[i][j];
