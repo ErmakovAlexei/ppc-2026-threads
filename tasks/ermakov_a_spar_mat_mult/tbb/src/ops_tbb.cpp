@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
-#include <utility>
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"

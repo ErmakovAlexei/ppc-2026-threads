@@ -137,7 +137,6 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
   const auto &input_binary = GetInput().binary;
   height_ = static_cast<int>(input_binary.size());
   width_ = static_cast<int>(input_binary.front().size());
-
   if (height_ <= 0 || width_ <= 0) {
     return false;
   }
@@ -189,6 +188,7 @@ bool MarinLMarkComponentsOMP::RunImpl() {
   FirstPassOMP();
   MergeStripeBorders();
   SecondPassOMP();
+  ConvertLabelsToOutput();
   return true;
 }
 
@@ -295,7 +295,6 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
 }
 
 bool MarinLMarkComponentsOMP::PostProcessingImpl() {
-  ConvertLabelsToOutput();
   OutType out;
   out.labels = labels_;
   GetOutput() = out;
