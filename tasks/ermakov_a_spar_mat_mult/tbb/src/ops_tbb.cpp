@@ -3,13 +3,40 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
 #include "oneapi/tbb/blocked_range.h"
+#include "oneapi/tbb/enumerable_thread_specific.h"
 #include "oneapi/tbb/parallel_for.h"
 
 namespace ermakov_a_spar_mat_mult {
+
+namespace {
+
+struct RowWorkspace {
+  std::vector<std::complex<double>> row_vals;
+  std::vector<int> row_mark;
+  std::vector<int> used_cols;
+
+  explicit RowWorkspace(int cols)
+      : row_vals(static_cast<std::size_t>(cols), std::complex<double>(0.0, 0.0)),
+        row_mark(static_cast<std::size_t>(cols), -1) {
+    used_cols.reserve(256);
+  }
+};
+
+int ResolveGrainSize(int rows) {
+  if (rows <= 0) {
+    return 1;
+  }
+
+  constexpr int kTargetChunks = 16;
+  return std::max(1, rows / kTargetChunks);
+}
+
+}  // namespace
 
 ErmakovASparMatMultTBB::ErmakovASparMatMultTBB(const InType &in) {
   SetTypeOfTask(GetStaticTypeOfTask());
@@ -155,19 +182,18 @@ bool ErmakovASparMatMultTBB::RunImpl() {
 
   std::vector<std::vector<std::complex<double>>> row_values(static_cast<std::size_t>(m));
   std::vector<std::vector<int>> row_cols(static_cast<std::size_t>(m));
+  tbb::enumerable_thread_specific<RowWorkspace> workspace([&] { return RowWorkspace(p); });
+  const int grain_size = ResolveGrainSize(m);
 
-  tbb::parallel_for(tbb::blocked_range<int>(0, m), [&](const tbb::blocked_range<int> &range) {
-    std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(p), std::complex<double>(0.0, 0.0));
-    std::vector<int> row_mark(static_cast<std::size_t>(p), -1);
-    std::vector<int> used_cols;
-    used_cols.reserve(256);
+  tbb::parallel_for(tbb::blocked_range<int>(0, m, grain_size), [&](const tbb::blocked_range<int> &range) {
+    auto &local = workspace.local();
 
     for (int i = range.begin(); i != range.end(); ++i) {
-      AccumulateRowProducts(i, row_vals, row_mark, used_cols);
-      SortUsedCols(used_cols);
+      AccumulateRowProducts(i, local.row_vals, local.row_mark, local.used_cols);
+      SortUsedCols(local.used_cols);
 
       const auto row_i = static_cast<std::size_t>(i);
-      CollectRowValues(row_vals, used_cols, row_cols[row_i], row_values[row_i]);
+      CollectRowValues(local.row_vals, local.used_cols, row_cols[row_i], row_values[row_i]);
     }
   });
 
