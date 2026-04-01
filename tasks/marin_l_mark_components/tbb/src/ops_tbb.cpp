@@ -1,6 +1,4 @@
-#include "marin_l_mark_components/omp/include/ops_omp.hpp"
-
-#include <omp.h>
+#include "marin_l_mark_components/tbb/include/ops_tbb.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -9,6 +7,9 @@
 #include <vector>
 
 #include "marin_l_mark_components/common/include/common.hpp"
+#include "oneapi/tbb/blocked_range.h"
+#include "oneapi/tbb/parallel_for.h"
+#include "util/include/util.hpp"
 
 namespace marin_l_mark_components {
 
@@ -16,6 +17,7 @@ namespace {
 
 constexpr std::uint64_t kMaxPixels = 100000000ULL;
 constexpr int kMinRowsPerStripe = 64;
+constexpr int kStripeOversubscription = 4;
 
 struct StripeRange {
   int row_start;
@@ -100,14 +102,26 @@ void ProcessStripe(const std::vector<std::uint8_t> &binary, std::vector<int> &la
   stripe_used_counts[static_cast<std::size_t>(stripe)] = next_label - stripe_range.base_label;
 }
 
+int ResolveGrainSize(int count) {
+  constexpr int kTargetChunks = 16;
+  return std::max(1, count / kTargetChunks);
+}
+
+int ResolveStripeCount(int height) {
+  const int threads = std::max(1, ppc::util::GetNumThreads());
+  const int max_stripes_by_height = std::max(1, height / kMinRowsPerStripe);
+  const int preferred_stripes = threads * kStripeOversubscription;
+  return std::min(height, std::min(preferred_stripes, max_stripes_by_height));
+}
+
 }  // namespace
 
-MarinLMarkComponentsOMP::MarinLMarkComponentsOMP(const InType &in) {
+MarinLMarkComponentsTBB::MarinLMarkComponentsTBB(const InType &in) {
   SetTypeOfTask(GetStaticTypeOfTask());
   GetInput() = in;
 }
 
-bool MarinLMarkComponentsOMP::IsBinary(const Image &img) {
+bool MarinLMarkComponentsTBB::IsBinary(const Image &img) {
   for (const auto &row : img) {
     for (int pixel : row) {
       if (pixel != 0 && pixel != 1) {
@@ -118,7 +132,7 @@ bool MarinLMarkComponentsOMP::IsBinary(const Image &img) {
   return true;
 }
 
-bool MarinLMarkComponentsOMP::ValidationImpl() {
+bool MarinLMarkComponentsTBB::ValidationImpl() {
   const auto &img = GetInput().binary;
   if (img.empty() || img.front().empty()) {
     return false;
@@ -130,14 +144,14 @@ bool MarinLMarkComponentsOMP::ValidationImpl() {
       return false;
     }
   }
+
   return IsBinary(img);
 }
 
-bool MarinLMarkComponentsOMP::PreProcessingImpl() {
+bool MarinLMarkComponentsTBB::PreProcessingImpl() {
   const auto &input_binary = GetInput().binary;
   height_ = static_cast<int>(input_binary.size());
   width_ = static_cast<int>(input_binary.front().size());
-
   if (height_ <= 0 || width_ <= 0) {
     return false;
   }
@@ -156,9 +170,9 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
   max_label_id_ = 0;
   generation_id_ = 1;
 
-  stripe_count_ = std::max(1, omp_get_max_threads());
-  stripe_count_ = std::min(stripe_count_, height_);
-  stripe_count_ = std::min(stripe_count_, std::max(1, height_ / kMinRowsPerStripe));
+  // TBB balances uneven workloads better when there are more independent tasks
+  // than worker threads, so we split the image into more stripes than OMP does.
+  stripe_count_ = ResolveStripeCount(height_);
   stripe_offsets_.assign(static_cast<std::size_t>(stripe_count_) + 1ULL, 0);
   stripe_used_counts_.assign(static_cast<std::size_t>(stripe_count_), 0);
   for (int stripe = 0; stripe < stripe_count_; ++stripe) {
@@ -169,53 +183,43 @@ bool MarinLMarkComponentsOMP::PreProcessingImpl() {
   std::partial_sum(stripe_offsets_.begin(), stripe_offsets_.end(), stripe_offsets_.begin());
   max_label_id_ = stripe_offsets_[static_cast<std::size_t>(stripe_count_)];
 
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(binary_, height_, input_binary, width_) schedule(static)
-#endif
-  for (int row = 0; row < height_; ++row) {
-    const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
-    for (int col = 0; col < width_; ++col) {
-      binary_[row_offset + static_cast<std::size_t>(col)] =
-          static_cast<std::uint8_t>(input_binary[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]);
+  tbb::parallel_for(tbb::blocked_range<int>(0, height_, ResolveGrainSize(height_)), [&](const auto &range) {
+    for (int row = range.begin(); row != range.end(); ++row) {
+      const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+      for (int col = 0; col < width_; ++col) {
+        binary_[row_offset + static_cast<std::size_t>(col)] =
+            static_cast<std::uint8_t>(input_binary[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]);
+      }
     }
-  }
+  });
 
   return true;
 }
 
-bool MarinLMarkComponentsOMP::RunImpl() {
-  FirstPassOMP();
+bool MarinLMarkComponentsTBB::RunImpl() {
+  FirstPassTBB();
   MergeStripeBorders();
-  SecondPassOMP();
+  SecondPassTBB();
   return true;
 }
 
-void MarinLMarkComponentsOMP::FirstPassOMP() {
-  const auto labels_count = static_cast<std::ptrdiff_t>(labels_flat_.size());
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(labels_count, labels_flat_) schedule(static)
-#endif
-  for (std::ptrdiff_t i = 0; i < labels_count; ++i) {
-    labels_flat_[static_cast<std::size_t>(i)] = 0;
-  }
+void MarinLMarkComponentsTBB::FirstPassTBB() {
+  const auto labels_count = static_cast<int>(labels_flat_.size());
+  tbb::parallel_for(tbb::blocked_range<int>(0, labels_count, ResolveGrainSize(labels_count)), [&](const auto &range) {
+    for (int i = range.begin(); i != range.end(); ++i) {
+      labels_flat_[static_cast<std::size_t>(i)] = 0;
+    }
+  });
 
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(binary_, height_, labels_flat_, parent_, stripe_count_, \
-                                                    stripe_offsets_, stripe_used_counts_, width_) schedule(static)
-#endif
-  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
-    const StripeRange stripe_range = GetStripeRange(stripe, height_, stripe_count_, stripe_offsets_);
-    ProcessStripe(binary_, labels_flat_, parent_, stripe_used_counts_, width_, stripe_range, stripe);
-  }
+  tbb::parallel_for(tbb::blocked_range<int>(0, stripe_count_, 1), [&](const auto &range) {
+    for (int stripe = range.begin(); stripe != range.end(); ++stripe) {
+      const StripeRange stripe_range = GetStripeRange(stripe, height_, stripe_count_, stripe_offsets_);
+      ProcessStripe(binary_, labels_flat_, parent_, stripe_used_counts_, width_, stripe_range, stripe);
+    }
+  });
 }
 
-void MarinLMarkComponentsOMP::MergeStripeBorders() {
+void MarinLMarkComponentsTBB::MergeStripeBorders() {
   for (int stripe = 0; stripe < stripe_count_ - 1; ++stripe) {
     const int border_row = ((stripe + 1) * height_) / stripe_count_;
     const std::size_t top_row_offset = static_cast<std::size_t>(border_row - 1) * static_cast<std::size_t>(width_);
@@ -233,27 +237,19 @@ void MarinLMarkComponentsOMP::MergeStripeBorders() {
     }
   }
 
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(parent_, stripe_count_, stripe_offsets_, stripe_used_counts_) \
-      schedule(static)
-#endif
-  for (int stripe = 0; stripe < stripe_count_; ++stripe) {
-    const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
-    const int used_count = stripe_used_counts_[static_cast<std::size_t>(stripe)];
-    for (int label = base_label; label < base_label + used_count; ++label) {
-      parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
+  tbb::parallel_for(tbb::blocked_range<int>(0, stripe_count_, 1), [&](const auto &range) {
+    for (int stripe = range.begin(); stripe != range.end(); ++stripe) {
+      const int base_label = 1 + stripe_offsets_[static_cast<std::size_t>(stripe)];
+      const int used_count = stripe_used_counts_[static_cast<std::size_t>(stripe)];
+      for (int label = base_label; label < base_label + used_count; ++label) {
+        parent_[static_cast<std::size_t>(label)] = FindRoot(parent_, label);
+      }
     }
-  }
+  });
 }
 
-void MarinLMarkComponentsOMP::SecondPassOMP() {
-  if (height_ == 0 || width_ == 0) {
-    return;
-  }
-
-  if (max_label_id_ == 0) {
+void MarinLMarkComponentsTBB::SecondPassTBB() {
+  if (height_ == 0 || width_ == 0 || max_label_id_ == 0) {
     return;
   }
 
@@ -276,25 +272,21 @@ void MarinLMarkComponentsOMP::SecondPassOMP() {
     }
   }
 
-  const std::size_t pixels = static_cast<std::size_t>(height_) * static_cast<std::size_t>(width_);
-  const auto pixels_count = static_cast<int64_t>(pixels);
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(labels_flat_, parent_, pixels_count, root_to_compact_) schedule(static)
-#endif
-  for (int64_t idx = 0; idx < pixels_count; ++idx) {
-    const int label = labels_flat_[static_cast<std::size_t>(idx)];
-    if (label == 0) {
-      continue;
-    }
+  const auto pixels_count = static_cast<int>(static_cast<std::size_t>(height_) * static_cast<std::size_t>(width_));
+  tbb::parallel_for(tbb::blocked_range<int>(0, pixels_count, ResolveGrainSize(pixels_count)), [&](const auto &range) {
+    for (int idx = range.begin(); idx != range.end(); ++idx) {
+      const int label = labels_flat_[static_cast<std::size_t>(idx)];
+      if (label == 0) {
+        continue;
+      }
 
-    const int root = parent_[static_cast<std::size_t>(label)];
-    labels_flat_[static_cast<std::size_t>(idx)] = root_to_compact_[static_cast<std::size_t>(root)];
-  }
+      const int root = parent_[static_cast<std::size_t>(label)];
+      labels_flat_[static_cast<std::size_t>(idx)] = root_to_compact_[static_cast<std::size_t>(root)];
+    }
+  });
 }
 
-bool MarinLMarkComponentsOMP::PostProcessingImpl() {
+bool MarinLMarkComponentsTBB::PostProcessingImpl() {
   ConvertLabelsToOutput();
   OutType out;
   out.labels = labels_;
@@ -302,23 +294,20 @@ bool MarinLMarkComponentsOMP::PostProcessingImpl() {
   return true;
 }
 
-void MarinLMarkComponentsOMP::ConvertLabelsToOutput() {
+void MarinLMarkComponentsTBB::ConvertLabelsToOutput() {
   labels_.clear();
   labels_.resize(static_cast<std::size_t>(height_));
 
-#ifdef _MSC_VER
-#  pragma omp parallel for schedule(static)
-#else
-#  pragma omp parallel for default(none) shared(height_, labels_, labels_flat_, width_) schedule(static)
-#endif
-  for (int row = 0; row < height_; ++row) {
-    labels_[static_cast<std::size_t>(row)].resize(static_cast<std::size_t>(width_));
-    const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
-    for (int col = 0; col < width_; ++col) {
-      labels_[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)] =
-          labels_flat_[row_offset + static_cast<std::size_t>(col)];
+  tbb::parallel_for(tbb::blocked_range<int>(0, height_, ResolveGrainSize(height_)), [&](const auto &range) {
+    for (int row = range.begin(); row != range.end(); ++row) {
+      labels_[static_cast<std::size_t>(row)].resize(static_cast<std::size_t>(width_));
+      const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+      for (int col = 0; col < width_; ++col) {
+        labels_[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)] =
+            labels_flat_[row_offset + static_cast<std::size_t>(col)];
+      }
     }
-  }
+  });
 }
 
 }  // namespace marin_l_mark_components
