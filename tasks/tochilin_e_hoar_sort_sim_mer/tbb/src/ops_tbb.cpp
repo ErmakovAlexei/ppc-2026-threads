@@ -100,12 +100,62 @@ int TochilinEHoarSortSimMerTBB::ResolvePartCount(std::size_t size) {
   return std::max(1, std::min(preferred_parts, max_parts_by_size));
 }
 
+std::vector<std::size_t> TochilinEHoarSortSimMerTBB::BuildBoundaries(std::size_t size, int part_count) {
+  std::vector<std::size_t> boundaries(static_cast<std::size_t>(part_count) + 1);
+  for (int i = 0; i <= part_count; ++i) {
+    boundaries[static_cast<std::size_t>(i)] = (static_cast<std::size_t>(i) * size) / part_count;
+  }
+  return boundaries;
+}
+
+void TochilinEHoarSortSimMerTBB::SortParts(std::vector<int> &data, const std::vector<std::size_t> &boundaries) {
+  const int part_count = static_cast<int>(boundaries.size()) - 1;
+  tbb::parallel_for(0, part_count, [&](int part) {
+    const std::size_t begin = boundaries[static_cast<std::size_t>(part)];
+    const std::size_t end = boundaries[static_cast<std::size_t>(part) + 1];
+    if (begin < end) {
+      QuickSortSequential(data, static_cast<int>(begin), static_cast<int>(end - 1));
+    }
+  });
+}
+
 void TochilinEHoarSortSimMerTBB::MergeRanges(const std::vector<int> &src, std::vector<int> &dst, std::size_t left,
                                              std::size_t mid, std::size_t right) {
   auto out = dst.begin() + static_cast<std::ptrdiff_t>(left);
   std::ranges::merge(src.begin() + static_cast<std::ptrdiff_t>(left), src.begin() + static_cast<std::ptrdiff_t>(mid),
                      src.begin() + static_cast<std::ptrdiff_t>(mid), src.begin() + static_cast<std::ptrdiff_t>(right),
                      out);
+}
+
+std::vector<std::size_t> TochilinEHoarSortSimMerTBB::MergePass(const std::vector<int> &src, std::vector<int> &dst,
+                                                               const std::vector<std::size_t> &current_boundaries) {
+  const std::size_t current_parts = current_boundaries.size() - 1;
+  const std::size_t merge_pairs = current_parts / 2;
+
+  tbb::parallel_for(std::size_t{0}, merge_pairs, [&](std::size_t pair_idx) {
+    const std::size_t left = current_boundaries[pair_idx * 2];
+    const std::size_t mid = current_boundaries[(pair_idx * 2) + 1];
+    const std::size_t right = current_boundaries[(pair_idx * 2) + 2];
+    MergeRanges(src, dst, left, mid, right);
+  });
+
+  if ((current_parts % 2) != 0U) {
+    const std::size_t tail_begin = current_boundaries[current_parts - 1];
+    std::ranges::copy(src.begin() + static_cast<std::ptrdiff_t>(tail_begin), src.end(),
+                      dst.begin() + static_cast<std::ptrdiff_t>(tail_begin));
+  }
+
+  std::vector<std::size_t> next_boundaries;
+  next_boundaries.reserve((current_parts / 2) + 2);
+  next_boundaries.push_back(0);
+  for (std::size_t i = 2; i < current_boundaries.size(); i += 2) {
+    next_boundaries.push_back(current_boundaries[i]);
+  }
+  if ((current_parts % 2) != 0U) {
+    next_boundaries.push_back(current_boundaries.back());
+  }
+
+  return next_boundaries;
 }
 
 bool TochilinEHoarSortSimMerTBB::RunImpl() {
@@ -121,53 +171,17 @@ bool TochilinEHoarSortSimMerTBB::RunImpl() {
     return true;
   }
 
-  std::vector<std::size_t> boundaries(static_cast<std::size_t>(part_count) + 1);
-  for (int i = 0; i <= part_count; ++i) {
-    boundaries[static_cast<std::size_t>(i)] = (static_cast<std::size_t>(i) * data.size()) / part_count;
-  }
-
-  tbb::parallel_for(0, part_count, [&](int part) {
-    const std::size_t begin = boundaries[static_cast<std::size_t>(part)];
-    const std::size_t end = boundaries[static_cast<std::size_t>(part) + 1];
-    if (begin < end) {
-      QuickSortSequential(data, static_cast<int>(begin), static_cast<int>(end - 1));
-    }
-  });
+  const std::vector<std::size_t> boundaries = BuildBoundaries(data.size(), part_count);
+  SortParts(data, boundaries);
 
   std::vector<int> buffer(data.size());
   std::vector<std::size_t> current_boundaries = boundaries;
   bool data_is_source = true;
 
   while ((current_boundaries.size() - 1) > 1) {
-    const std::size_t current_parts = current_boundaries.size() - 1;
-    const std::size_t merge_pairs = current_parts / 2;
     const auto &src = data_is_source ? data : buffer;
     auto &dst = data_is_source ? buffer : data;
-
-    tbb::parallel_for(std::size_t{0}, merge_pairs, [&](std::size_t pair_idx) {
-      const std::size_t left = current_boundaries[pair_idx * 2];
-      const std::size_t mid = current_boundaries[(pair_idx * 2) + 1];
-      const std::size_t right = current_boundaries[(pair_idx * 2) + 2];
-      MergeRanges(src, dst, left, mid, right);
-    });
-
-    if ((current_parts % 2) != 0U) {
-      const std::size_t tail_begin = current_boundaries[current_parts - 1];
-      std::ranges::copy(src.begin() + static_cast<std::ptrdiff_t>(tail_begin), src.end(),
-                        dst.begin() + static_cast<std::ptrdiff_t>(tail_begin));
-    }
-
-    std::vector<std::size_t> next_boundaries;
-    next_boundaries.reserve((current_parts / 2) + 2);
-    next_boundaries.push_back(0);
-    for (std::size_t i = 2; i < current_boundaries.size(); i += 2) {
-      next_boundaries.push_back(current_boundaries[i]);
-    }
-    if ((current_parts % 2) != 0U) {
-      next_boundaries.push_back(current_boundaries.back());
-    }
-
-    current_boundaries = std::move(next_boundaries);
+    current_boundaries = MergePass(src, dst, current_boundaries);
     data_is_source = !data_is_source;
   }
 
