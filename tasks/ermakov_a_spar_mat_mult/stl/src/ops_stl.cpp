@@ -113,21 +113,22 @@ std::vector<int> ErmakovASparMatMultSTL::BuildRowCosts(const MatrixCRS &a, const
 }
 
 std::vector<int> ErmakovASparMatMultSTL::BuildThreadBoundaries(const std::vector<int> &row_costs, int thread_count) {
-  std::vector<int> boundaries(static_cast<std::size_t>(thread_count) + 1, 0);
-  boundaries.back() = static_cast<int>(row_costs.size());
+  const int safe_thread_count = std::max(1, thread_count);
+  std::vector<int> boundaries(static_cast<std::size_t>(safe_thread_count) + 1, 0);
+  boundaries[static_cast<std::size_t>(safe_thread_count)] = static_cast<int>(row_costs.size());
 
-  if (thread_count <= 1 || row_costs.empty()) {
+  if (safe_thread_count <= 1 || row_costs.empty()) {
     return boundaries;
   }
 
   const std::size_t total_work = std::accumulate(row_costs.begin(), row_costs.end(), std::size_t{0});
-  const std::size_t target_chunk = std::max<std::size_t>(1, total_work / static_cast<std::size_t>(thread_count));
+  const std::size_t target_chunk = std::max<std::size_t>(1, total_work / static_cast<std::size_t>(safe_thread_count));
 
   std::size_t accumulated = 0;
   std::size_t next_target = target_chunk;
   int boundary_index = 1;
 
-  for (int row = 0; row < static_cast<int>(row_costs.size()) && boundary_index < thread_count; ++row) {
+  for (int row = 0; row < static_cast<int>(row_costs.size()) && boundary_index < safe_thread_count; ++row) {
     accumulated += static_cast<std::size_t>(row_costs[static_cast<std::size_t>(row)]);
     if (accumulated >= next_target) {
       boundaries[static_cast<std::size_t>(boundary_index)] = row + 1;
@@ -136,7 +137,7 @@ std::vector<int> ErmakovASparMatMultSTL::BuildThreadBoundaries(const std::vector
     }
   }
 
-  for (; boundary_index < thread_count; ++boundary_index) {
+  for (; boundary_index < safe_thread_count; ++boundary_index) {
     boundaries[static_cast<std::size_t>(boundary_index)] = boundaries[static_cast<std::size_t>(boundary_index) - 1];
   }
 
