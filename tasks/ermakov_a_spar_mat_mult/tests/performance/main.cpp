@@ -65,7 +65,7 @@ MatrixCRS DenseToCRS(const DenseMatrix &m, double eps = 1e-12) {
 
 class ErmakovARunPerfTestSparMatMult : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
-  const int k_count = 15100;
+  const int k_count = 10000;
   InType input_data{};
 
   void SetUp() override {

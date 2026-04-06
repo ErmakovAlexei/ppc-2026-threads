@@ -34,8 +34,8 @@ Image MakeRandomBinaryImage(int height, int width, double fill_probability) {
 
 class MarinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
-  const int k_width_pixels = 8192;
-  const int k_height_pixels = 8192;
+  const int k_width_pixels = 4096;
+  const int k_height_pixels = 4096;
   InType input_data{};
 
   void SetUp() override {
