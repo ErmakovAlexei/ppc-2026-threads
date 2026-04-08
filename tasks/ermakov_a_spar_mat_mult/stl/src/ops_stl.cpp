@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <numeric>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
@@ -122,11 +121,12 @@ std::vector<int> ErmakovASparMatMultSTL::BuildThreadBoundaries(const std::vector
   std::size_t accumulated = 0;
   std::size_t next_target = target_chunk;
   int boundary_index = 1;
+  const auto row_count = row_costs.size();
 
-  for (int row = 0; row < static_cast<int>(row_costs.size()) && boundary_index < safe_thread_count; ++row) {
-    accumulated += static_cast<std::size_t>(row_costs[static_cast<std::size_t>(row)]);
+  for (std::size_t row = 0; row < row_count && boundary_index < safe_thread_count; ++row) {
+    accumulated += static_cast<std::size_t>(row_costs[row]);
     if (accumulated >= next_target) {
-      boundaries[static_cast<std::size_t>(boundary_index)] = row + 1;
+      boundaries[static_cast<std::size_t>(boundary_index)] = static_cast<int>(row) + 1;
       ++boundary_index;
       next_target = target_chunk * static_cast<std::size_t>(boundary_index);
     }
@@ -140,7 +140,7 @@ std::vector<int> ErmakovASparMatMultSTL::BuildThreadBoundaries(const std::vector
 }
 
 void ErmakovASparMatMultSTL::ResetWorkspace(Workspace &workspace, int cols) {
-  if (static_cast<int>(workspace.accum.size()) != cols) {
+  if (workspace.accum.size() != static_cast<std::size_t>(cols)) {
     workspace.accum.assign(static_cast<std::size_t>(cols), kZero);
     workspace.marks.assign(static_cast<std::size_t>(cols), -1);
     workspace.touched_cols.clear();
@@ -199,7 +199,7 @@ void ErmakovASparMatMultSTL::FinalizeResult(const std::vector<RowData> &rows_dat
 
   for (int i = 0; i < c_.rows; ++i) {
     const auto &row = rows_data[static_cast<std::size_t>(i)];
-    const std::size_t offset = static_cast<std::size_t>(c_.row_ptr[static_cast<std::size_t>(i)]);
+    const auto offset = static_cast<std::size_t>(c_.row_ptr[static_cast<std::size_t>(i)]);
 
     std::ranges::copy(row.cols, c_.col_index.begin() + static_cast<std::ptrdiff_t>(offset));
     std::ranges::copy(row.vals, c_.values.begin() + static_cast<std::ptrdiff_t>(offset));

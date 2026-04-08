@@ -15,7 +15,7 @@ namespace tochilin_e_hoar_sort_sim_mer {
 
 class TochilinEHoarSortSimMerRunPerfTests : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
-  const int k_count = 500000;
+  const int k_count = 2000000;
   InType input_data;
 
   void SetUp() override {
