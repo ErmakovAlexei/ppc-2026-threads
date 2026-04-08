@@ -16,12 +16,7 @@ namespace ermakov_a_spar_mat_mult {
 namespace {
 
 constexpr std::complex<double> kZero{0.0, 0.0};
-constexpr double kZeroEps = 1e-12;
 constexpr std::size_t kMinWorkPerThread = 4096;
-
-bool IsZero(const std::complex<double> &value) {
-  return std::abs(value.real()) <= kZeroEps && std::abs(value.imag()) <= kZeroEps;
-}
 
 }  // namespace
 
@@ -183,7 +178,7 @@ void ErmakovASparMatMultSTL::MultiplyRow(int row_index, Workspace &workspace, Ro
 
   for (int col : workspace.touched_cols) {
     const auto &value = workspace.accum[static_cast<std::size_t>(col)];
-    if (!IsZero(value)) {
+    if (value != kZero) {
       row_data.cols.push_back(col);
       row_data.vals.push_back(value);
     }
