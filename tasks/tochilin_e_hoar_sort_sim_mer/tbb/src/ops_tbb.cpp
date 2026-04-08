@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <iterator>
 #include <utility>
 #include <vector>
 
+#include "oneapi/tbb/blocked_range.h"
 #include "oneapi/tbb/info.h"
 #include "oneapi/tbb/parallel_for.h"
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
@@ -82,13 +82,6 @@ void TochilinEHoarSortSimMerTBB::QuickSortSequential(std::vector<int> &arr, int 
   }
 }
 
-std::vector<int> TochilinEHoarSortSimMerTBB::MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b) {
-  std::vector<int> result;
-  result.reserve(a.size() + b.size());
-  std::ranges::merge(a, b, std::back_inserter(result));
-  return result;
-}
-
 int TochilinEHoarSortSimMerTBB::ResolvePartCount(std::size_t size) {
   if (size < (2 * kMinPartSize)) {
     return 1;
@@ -98,6 +91,15 @@ int TochilinEHoarSortSimMerTBB::ResolvePartCount(std::size_t size) {
   const int preferred_parts = concurrency * kOversubscription;
   const int max_parts_by_size = static_cast<int>(size / kMinPartSize);
   return std::max(1, std::min(preferred_parts, max_parts_by_size));
+}
+
+std::size_t TochilinEHoarSortSimMerTBB::ResolveGrainSize(std::size_t task_count) {
+  if (task_count <= 1) {
+    return 1;
+  }
+
+  const auto concurrency = static_cast<std::size_t>(std::max(1, tbb::info::default_concurrency()));
+  return std::max<std::size_t>(1, task_count / (concurrency * kOversubscription));
 }
 
 std::vector<std::size_t> TochilinEHoarSortSimMerTBB::BuildBoundaries(std::size_t size, int part_count) {
@@ -110,11 +112,15 @@ std::vector<std::size_t> TochilinEHoarSortSimMerTBB::BuildBoundaries(std::size_t
 
 void TochilinEHoarSortSimMerTBB::SortParts(std::vector<int> &data, const std::vector<std::size_t> &boundaries) {
   const int part_count = static_cast<int>(boundaries.size()) - 1;
-  tbb::parallel_for(0, part_count, [&](int part) {
-    const std::size_t begin = boundaries[static_cast<std::size_t>(part)];
-    const std::size_t end = boundaries[static_cast<std::size_t>(part) + 1];
-    if (begin < end) {
-      QuickSortSequential(data, static_cast<int>(begin), static_cast<int>(end - 1));
+  const auto grain_size = static_cast<int>(ResolveGrainSize(static_cast<std::size_t>(part_count)));
+
+  tbb::parallel_for(tbb::blocked_range<int>(0, part_count, grain_size), [&](const tbb::blocked_range<int> &range) {
+    for (int part = range.begin(); part != range.end(); ++part) {
+      const std::size_t begin = boundaries[static_cast<std::size_t>(part)];
+      const std::size_t end = boundaries[static_cast<std::size_t>(part) + 1];
+      if (begin < end) {
+        QuickSortSequential(data, static_cast<int>(begin), static_cast<int>(end - 1));
+      }
     }
   });
 }
@@ -131,12 +137,16 @@ std::vector<std::size_t> TochilinEHoarSortSimMerTBB::MergePass(const std::vector
                                                                const std::vector<std::size_t> &current_boundaries) {
   const std::size_t current_parts = current_boundaries.size() - 1;
   const std::size_t merge_pairs = current_parts / 2;
+  const auto grain_size = ResolveGrainSize(merge_pairs);
 
-  tbb::parallel_for(std::size_t{0}, merge_pairs, [&](std::size_t pair_idx) {
-    const std::size_t left = current_boundaries[pair_idx * 2];
-    const std::size_t mid = current_boundaries[(pair_idx * 2) + 1];
-    const std::size_t right = current_boundaries[(pair_idx * 2) + 2];
-    MergeRanges(src, dst, left, mid, right);
+  tbb::parallel_for(tbb::blocked_range<std::size_t>(0, merge_pairs, grain_size),
+                    [&](const tbb::blocked_range<std::size_t> &range) {
+    for (std::size_t pair_idx = range.begin(); pair_idx != range.end(); ++pair_idx) {
+      const std::size_t left = current_boundaries[pair_idx * 2];
+      const std::size_t mid = current_boundaries[(pair_idx * 2) + 1];
+      const std::size_t right = current_boundaries[(pair_idx * 2) + 2];
+      MergeRanges(src, dst, left, mid, right);
+    }
   });
 
   if ((current_parts % 2) != 0U) {
