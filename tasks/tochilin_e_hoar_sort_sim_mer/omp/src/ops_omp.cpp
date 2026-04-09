@@ -111,10 +111,10 @@ bool TochilinEHoarSortSimMerOMP::RunImpl() {
   {
 #pragma omp single
     {
-#pragma omp task shared(left)
+#pragma omp task default(none) shared(left)
       QuickSortOMP(left, 0, static_cast<int>(left.size()) - 1, 3);
 
-#pragma omp task shared(right)
+#pragma omp task default(none) shared(right)
       QuickSortOMP(right, 0, static_cast<int>(right.size()) - 1, 3);
 
 #pragma omp taskwait

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "marin_l_mark_components/common/include/common.hpp"
@@ -16,6 +17,13 @@ namespace {
 
 constexpr std::uint64_t kMaxPixels = 100000000ULL;
 constexpr int kMinRowsPerStripe = 64;
+
+struct StripeSetup {
+  int num_stripes = 1;
+  int total_max_labels = 1;
+  std::vector<int> stripe_bounds;
+  std::vector<int> stripe_base_label;
+};
 
 int FindRoot(std::vector<int> &parent, int x) {
   int root = x;
@@ -45,6 +53,140 @@ void UnionLabels(std::vector<int> &parent, int a, int b) {
   } else {
     parent[root_a] = root_b;
   }
+}
+
+StripeSetup BuildStripeSetup(int height, int width) {
+  StripeSetup setup;
+
+  setup.num_stripes = std::min(height, oneapi::tbb::this_task_arena::max_concurrency() * 2);
+  if (setup.num_stripes > 0 && height / setup.num_stripes < kMinRowsPerStripe) {
+    setup.num_stripes = std::max(1, height / kMinRowsPerStripe);
+  }
+  setup.num_stripes = std::max(1, setup.num_stripes);
+
+  setup.stripe_bounds.assign(static_cast<std::size_t>(setup.num_stripes) + 1ULL, 0);
+  for (int stripe = 0; stripe <= setup.num_stripes; ++stripe) {
+    setup.stripe_bounds[static_cast<std::size_t>(stripe)] = (stripe * height) / setup.num_stripes;
+  }
+
+  setup.stripe_base_label.assign(static_cast<std::size_t>(setup.num_stripes), 0);
+  for (int stripe = 0; stripe < setup.num_stripes; ++stripe) {
+    setup.stripe_base_label[static_cast<std::size_t>(stripe)] = setup.total_max_labels;
+    const int stripe_height = setup.stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL] -
+                              setup.stripe_bounds[static_cast<std::size_t>(stripe)];
+    setup.total_max_labels += ((stripe_height * width) / 2) + 1;
+  }
+
+  return setup;
+}
+
+void InitializeParents(std::vector<int> &parent, int total_max_labels) {
+  tbb::parallel_for(tbb::blocked_range<int>(0, total_max_labels), [&](const tbb::blocked_range<int> &range) {
+    for (int label = range.begin(); label != range.end(); ++label) {
+      parent[static_cast<std::size_t>(label)] = label;
+    }
+  });
+}
+
+void LabelStripe(const std::vector<std::uint8_t> &binary_flat, std::vector<int> &labels_flat, std::vector<int> &parent,
+                 const std::vector<int> &stripe_bounds, const std::vector<int> &stripe_base_label,
+                 std::vector<int> &stripe_max_used, int width, int stripe) {
+  const int start_row = stripe_bounds[static_cast<std::size_t>(stripe)];
+  const int end_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
+  int next_label = stripe_base_label[static_cast<std::size_t>(stripe)];
+
+  for (int row = start_row; row < end_row; ++row) {
+    const auto row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width);
+    const auto prev_row_offset = static_cast<std::size_t>(row - 1) * static_cast<std::size_t>(width);
+
+    for (int col = 0; col < width; ++col) {
+      const auto idx = row_offset + static_cast<std::size_t>(col);
+      if (binary_flat[idx] == 0U) {
+        continue;
+      }
+
+      const int left_label = (col > 0) ? labels_flat[idx - 1ULL] : 0;
+      const int top_label = (row > start_row) ? labels_flat[prev_row_offset + static_cast<std::size_t>(col)] : 0;
+
+      if (left_label == 0 && top_label == 0) {
+        labels_flat[idx] = next_label++;
+        continue;
+      }
+      if (left_label != 0 && top_label == 0) {
+        labels_flat[idx] = left_label;
+        continue;
+      }
+      if (left_label == 0 && top_label != 0) {
+        labels_flat[idx] = top_label;
+        continue;
+      }
+
+      const int min_label = std::min(left_label, top_label);
+      labels_flat[idx] = min_label;
+      if (left_label != top_label) {
+        UnionLabels(parent, left_label, top_label);
+      }
+    }
+  }
+
+  stripe_max_used[static_cast<std::size_t>(stripe)] = next_label;
+}
+
+void MergeStripeBorders(const std::vector<std::uint8_t> &binary_flat, const std::vector<int> &stripe_bounds,
+                        std::vector<int> &labels_flat, std::vector<int> &parent, int width, int num_stripes) {
+  for (int stripe = 0; stripe < num_stripes - 1; ++stripe) {
+    const int boundary_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
+    const auto row_offset = static_cast<std::size_t>(boundary_row) * static_cast<std::size_t>(width);
+    const auto prev_row_offset = static_cast<std::size_t>(boundary_row - 1) * static_cast<std::size_t>(width);
+
+    for (int col = 0; col < width; ++col) {
+      const auto bottom_idx = row_offset + static_cast<std::size_t>(col);
+      const auto top_idx = prev_row_offset + static_cast<std::size_t>(col);
+      if (binary_flat[bottom_idx] == 1U && binary_flat[top_idx] == 1U) {
+        UnionLabels(parent, labels_flat[bottom_idx], labels_flat[top_idx]);
+      }
+    }
+  }
+}
+
+std::vector<int> BuildCompactedLabels(std::vector<int> &parent, const std::vector<int> &stripe_base_label,
+                                      const std::vector<int> &stripe_max_used, int total_max_labels, int num_stripes) {
+  std::vector<int> compacted(static_cast<std::size_t>(total_max_labels), 0);
+  int next_compact_id = 1;
+
+  for (int stripe = 0; stripe < num_stripes; ++stripe) {
+    for (int label = stripe_base_label[static_cast<std::size_t>(stripe)];
+         label < stripe_max_used[static_cast<std::size_t>(stripe)]; ++label) {
+      const int root = FindRoot(parent, label);
+      if (compacted[static_cast<std::size_t>(root)] == 0) {
+        compacted[static_cast<std::size_t>(root)] = next_compact_id++;
+      }
+      compacted[static_cast<std::size_t>(label)] = compacted[static_cast<std::size_t>(root)];
+    }
+  }
+
+  return compacted;
+}
+
+void ApplyCompactedLabels(std::vector<int> &labels_flat, const std::vector<int> &compacted,
+                          const std::vector<int> &stripe_bounds, int width, int num_stripes) {
+  tbb::parallel_for(tbb::blocked_range<int>(0, num_stripes), [&](const tbb::blocked_range<int> &range) {
+    for (int stripe = range.begin(); stripe != range.end(); ++stripe) {
+      const int start_row = stripe_bounds[static_cast<std::size_t>(stripe)];
+      const int end_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
+
+      for (int row = start_row; row < end_row; ++row) {
+        const auto row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width);
+        for (int col = 0; col < width; ++col) {
+          const auto idx = row_offset + static_cast<std::size_t>(col);
+          const int label = labels_flat[idx];
+          if (label != 0) {
+            labels_flat[idx] = compacted[static_cast<std::size_t>(label)];
+          }
+        }
+      }
+    }
+  });
 }
 
 }  // namespace
@@ -101,7 +243,7 @@ bool MarinLMarkComponentsTBB::PreProcessingImpl() {
 
   tbb::parallel_for(tbb::blocked_range<int>(0, height_), [&](const tbb::blocked_range<int> &range) {
     for (int row = range.begin(); row != range.end(); ++row) {
-      const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+      const auto row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
       for (int col = 0; col < width_; ++col) {
         binary_flat_[row_offset + static_cast<std::size_t>(col)] =
             static_cast<std::uint8_t>(img[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)]);
@@ -117,129 +259,34 @@ bool MarinLMarkComponentsTBB::RunImpl() {
     return true;
   }
 
-  int num_stripes = std::min(height_, oneapi::tbb::this_task_arena::max_concurrency() * 2);
-  if (num_stripes > 0 && height_ / num_stripes < kMinRowsPerStripe) {
-    num_stripes = std::max(1, height_ / kMinRowsPerStripe);
-  }
-  num_stripes = std::max(1, num_stripes);
+  const StripeSetup setup = BuildStripeSetup(height_, width_);
+  std::vector<int> parent(static_cast<std::size_t>(setup.total_max_labels), 0);
+  InitializeParents(parent, setup.total_max_labels);
 
-  std::vector<int> stripe_bounds(static_cast<std::size_t>(num_stripes) + 1ULL, 0);
-  for (int i = 0; i <= num_stripes; ++i) {
-    stripe_bounds[static_cast<std::size_t>(i)] = (i * height_) / num_stripes;
-  }
-
-  std::vector<int> stripe_base_label(static_cast<std::size_t>(num_stripes), 0);
-  int total_max_labels = 1;
-  for (int stripe = 0; stripe < num_stripes; ++stripe) {
-    stripe_base_label[static_cast<std::size_t>(stripe)] = total_max_labels;
-    const int stripe_height =
-        stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL] - stripe_bounds[static_cast<std::size_t>(stripe)];
-    total_max_labels += ((stripe_height * width_) / 2) + 1;
-  }
-
-  std::vector<int> parent(static_cast<std::size_t>(total_max_labels), 0);
-  tbb::parallel_for(tbb::blocked_range<int>(0, total_max_labels), [&](const tbb::blocked_range<int> &range) {
-    for (int i = range.begin(); i != range.end(); ++i) {
-      parent[static_cast<std::size_t>(i)] = i;
-    }
-  });
-
-  std::vector<int> stripe_max_used(static_cast<std::size_t>(num_stripes), 0);
-
-  tbb::parallel_for(tbb::blocked_range<int>(0, num_stripes), [&](const tbb::blocked_range<int> &range) {
+  std::vector<int> stripe_max_used(static_cast<std::size_t>(setup.num_stripes), 0);
+  tbb::parallel_for(tbb::blocked_range<int>(0, setup.num_stripes), [&](const tbb::blocked_range<int> &range) {
     for (int stripe = range.begin(); stripe != range.end(); ++stripe) {
-      const int start_row = stripe_bounds[static_cast<std::size_t>(stripe)];
-      const int end_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
-      int next_label = stripe_base_label[static_cast<std::size_t>(stripe)];
-
-      for (int row = start_row; row < end_row; ++row) {
-        const int row_offset = row * width_;
-        const int prev_row_offset = (row - 1) * width_;
-
-        for (int col = 0; col < width_; ++col) {
-          const std::size_t idx = static_cast<std::size_t>(row_offset + col);
-          if (binary_flat_[idx] == 0U) {
-            continue;
-          }
-
-          const int left_label = (col > 0) ? labels_flat_[idx - 1ULL] : 0;
-          const int top_label = (row > start_row) ? labels_flat_[static_cast<std::size_t>(prev_row_offset + col)] : 0;
-
-          if (left_label == 0 && top_label == 0) {
-            labels_flat_[idx] = next_label++;
-          } else if (left_label != 0 && top_label == 0) {
-            labels_flat_[idx] = left_label;
-          } else if (left_label == 0 && top_label != 0) {
-            labels_flat_[idx] = top_label;
-          } else {
-            const int min_label = std::min(left_label, top_label);
-            labels_flat_[idx] = min_label;
-            if (left_label != top_label) {
-              UnionLabels(parent, left_label, top_label);
-            }
-          }
-        }
-      }
-
-      stripe_max_used[static_cast<std::size_t>(stripe)] = next_label;
+      LabelStripe(binary_flat_, labels_flat_, parent, setup.stripe_bounds, setup.stripe_base_label, stripe_max_used,
+                  width_, stripe);
     }
   });
 
-  for (int stripe = 0; stripe < num_stripes - 1; ++stripe) {
-    const int boundary_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
-    const int row_offset = boundary_row * width_;
-    const int prev_row_offset = (boundary_row - 1) * width_;
-
-    for (int col = 0; col < width_; ++col) {
-      const std::size_t bottom_idx = static_cast<std::size_t>(row_offset + col);
-      const std::size_t top_idx = static_cast<std::size_t>(prev_row_offset + col);
-      if (binary_flat_[bottom_idx] == 1U && binary_flat_[top_idx] == 1U) {
-        UnionLabels(parent, labels_flat_[bottom_idx], labels_flat_[top_idx]);
-      }
-    }
-  }
-
-  std::vector<int> compacted(static_cast<std::size_t>(total_max_labels), 0);
-  int next_compact_id = 1;
-
-  for (int stripe = 0; stripe < num_stripes; ++stripe) {
-    for (int label = stripe_base_label[static_cast<std::size_t>(stripe)];
-         label < stripe_max_used[static_cast<std::size_t>(stripe)]; ++label) {
-      const int root = FindRoot(parent, label);
-      if (compacted[static_cast<std::size_t>(root)] == 0) {
-        compacted[static_cast<std::size_t>(root)] = next_compact_id++;
-      }
-      compacted[static_cast<std::size_t>(label)] = compacted[static_cast<std::size_t>(root)];
-    }
-  }
-
-  tbb::parallel_for(tbb::blocked_range<int>(0, num_stripes), [&](const tbb::blocked_range<int> &range) {
-    for (int stripe = range.begin(); stripe != range.end(); ++stripe) {
-      const int start_row = stripe_bounds[static_cast<std::size_t>(stripe)];
-      const int end_row = stripe_bounds[static_cast<std::size_t>(stripe) + 1ULL];
-
-      for (int row = start_row; row < end_row; ++row) {
-        const int row_offset = row * width_;
-        for (int col = 0; col < width_; ++col) {
-          const std::size_t idx = static_cast<std::size_t>(row_offset + col);
-          const int label = labels_flat_[idx];
-          if (label != 0) {
-            labels_flat_[idx] = compacted[static_cast<std::size_t>(label)];
-          }
-        }
-      }
-    }
-  });
+  MergeStripeBorders(binary_flat_, setup.stripe_bounds, labels_flat_, parent, width_, setup.num_stripes);
+  const std::vector<int> compacted =
+      BuildCompactedLabels(parent, setup.stripe_base_label, stripe_max_used, setup.total_max_labels, setup.num_stripes);
+  ApplyCompactedLabels(labels_flat_, compacted, setup.stripe_bounds, width_, setup.num_stripes);
 
   return true;
 }
 
 bool MarinLMarkComponentsTBB::PostProcessingImpl() {
-  labels_out_.assign(static_cast<std::size_t>(height_), std::vector<int>(static_cast<std::size_t>(width_), 0));
+  labels_out_.clear();
+  labels_out_.resize(static_cast<std::size_t>(height_));
 
   tbb::parallel_for(tbb::blocked_range<int>(0, height_), [&](const tbb::blocked_range<int> &range) {
     for (int row = range.begin(); row != range.end(); ++row) {
-      const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
+      labels_out_[static_cast<std::size_t>(row)].resize(static_cast<std::size_t>(width_));
+      const auto row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(width_);
       std::copy(labels_flat_.begin() + static_cast<std::ptrdiff_t>(row_offset),
                 labels_flat_.begin() + static_cast<std::ptrdiff_t>(row_offset) + width_,
                 labels_out_[static_cast<std::size_t>(row)].begin());
