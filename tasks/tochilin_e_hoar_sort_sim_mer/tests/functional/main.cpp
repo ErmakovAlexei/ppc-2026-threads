@@ -75,10 +75,12 @@ TEST_P(TochilinEHoarSortSimMerRunFuncTests, TestSorting) {
   ExecuteTest(GetParam());
 }
 
-const std::array<TestType, 8> kTestParam = {
-    std::make_tuple(1, "OneElement"),      std::make_tuple(2, "TwoElements"),  std::make_tuple(8, "EightElements"),
-    std::make_tuple(13, "RandomSize"),     std::make_tuple(100, "MediumSize"), std::make_tuple(128, "AlreadySorted"),
-    std::make_tuple(127, "ReverseSorted"), std::make_tuple(512, "LargeSize")};
+const std::array<TestType, 10> kTestParam = {
+    std::make_tuple(1, "OneElement"),       std::make_tuple(2, "TwoElements"),
+    std::make_tuple(8, "EightElements"),    std::make_tuple(13, "RandomSize"),
+    std::make_tuple(100, "MediumSize"),     std::make_tuple(128, "AlreadySorted"),
+    std::make_tuple(127, "ReverseSorted"),  std::make_tuple(512, "LargeSize"),
+    std::make_tuple(10000, "ParallelSize"), std::make_tuple(20000, "ParallelOddMerge")};
 
 const auto kTestTasksList = std::tuple_cat(
     ppc::util::AddFuncTask<TochilinEHoarSortSimMerSTL, InType>(kTestParam, PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer),
