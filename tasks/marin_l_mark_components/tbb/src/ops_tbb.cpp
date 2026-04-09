@@ -88,6 +88,28 @@ void InitializeParents(std::vector<int> &parent, int total_max_labels) {
   });
 }
 
+void AssignPixelLabel(std::vector<int> &labels_flat, std::vector<int> &parent, std::size_t idx, int left_label,
+                      int top_label, int &next_label) {
+  if (left_label == 0 && top_label == 0) {
+    labels_flat[idx] = next_label++;
+    return;
+  }
+  if (left_label != 0 && top_label == 0) {
+    labels_flat[idx] = left_label;
+    return;
+  }
+  if (left_label == 0 && top_label != 0) {
+    labels_flat[idx] = top_label;
+    return;
+  }
+
+  const int min_label = std::min(left_label, top_label);
+  labels_flat[idx] = min_label;
+  if (left_label != top_label) {
+    UnionLabels(parent, left_label, top_label);
+  }
+}
+
 void LabelStripe(const std::vector<std::uint8_t> &binary_flat, std::vector<int> &labels_flat, std::vector<int> &parent,
                  const std::vector<int> &stripe_bounds, const std::vector<int> &stripe_base_label,
                  std::vector<int> &stripe_max_used, int width, int stripe) {
@@ -107,25 +129,7 @@ void LabelStripe(const std::vector<std::uint8_t> &binary_flat, std::vector<int> 
 
       const int left_label = (col > 0) ? labels_flat[idx - 1ULL] : 0;
       const int top_label = (row > start_row) ? labels_flat[prev_row_offset + static_cast<std::size_t>(col)] : 0;
-
-      if (left_label == 0 && top_label == 0) {
-        labels_flat[idx] = next_label++;
-        continue;
-      }
-      if (left_label != 0 && top_label == 0) {
-        labels_flat[idx] = left_label;
-        continue;
-      }
-      if (left_label == 0 && top_label != 0) {
-        labels_flat[idx] = top_label;
-        continue;
-      }
-
-      const int min_label = std::min(left_label, top_label);
-      labels_flat[idx] = min_label;
-      if (left_label != top_label) {
-        UnionLabels(parent, left_label, top_label);
-      }
+      AssignPixelLabel(labels_flat, parent, idx, left_label, top_label, next_label);
     }
   }
 
