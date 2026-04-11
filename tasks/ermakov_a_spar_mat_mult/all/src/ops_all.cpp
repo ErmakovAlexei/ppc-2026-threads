@@ -14,39 +14,134 @@ namespace ermakov_a_spar_mat_mult {
 
 namespace {
 
-struct RowChunk {
-  int row_begin = 0;
-  int row_end = 0;
-};
-
 struct LocalRowData {
   std::vector<int> cols;
   std::vector<std::complex<double>> vals;
 };
 
-RowChunk ResolveRowChunk(int rank, int size, int total_rows) {
-  const int row_begin = (rank * total_rows) / size;
-  const int row_end = ((rank + 1) * total_rows) / size;
-  return {.row_begin = row_begin, .row_end = row_end};
+std::vector<int> BuildRowBounds(const MatrixCRS &matrix, int proc_count) {
+  std::vector<int> bounds(static_cast<std::size_t>(proc_count) + 1ULL, 0);
+  bounds.back() = matrix.rows;
+
+  const int total_nnz = matrix.row_ptr[static_cast<std::size_t>(matrix.rows)];
+  if (proc_count <= 1 || total_nnz == 0) {
+    for (int proc = 0; proc <= proc_count; ++proc) {
+      bounds[static_cast<std::size_t>(proc)] = (proc * matrix.rows) / proc_count;
+    }
+    return bounds;
+  }
+
+  int next_proc = 1;
+  for (int row = 0; row < matrix.rows && next_proc < proc_count; ++row) {
+    const int prefix_nnz = matrix.row_ptr[static_cast<std::size_t>(row + 1)];
+    const int target_nnz = (next_proc * total_nnz) / proc_count;
+    if (prefix_nnz >= target_nnz) {
+      bounds[static_cast<std::size_t>(next_proc)] = row + 1;
+      ++next_proc;
+    }
+  }
+
+  while (next_proc < proc_count) {
+    bounds[static_cast<std::size_t>(next_proc)] = matrix.rows;
+    ++next_proc;
+  }
+
+  return bounds;
 }
 
-MatrixCRS SliceRows(const MatrixCRS &matrix, int row_begin, int row_end) {
+std::vector<int> BuildCountsFromBounds(const std::vector<int> &bounds) {
+  std::vector<int> counts(bounds.size() - 1ULL, 0);
+  for (std::size_t proc = 0; proc + 1 < bounds.size(); ++proc) {
+    counts[proc] = bounds[proc + 1] - bounds[proc];
+  }
+  return counts;
+}
+
+std::vector<int> BuildDisplacements(const std::vector<int> &counts) {
+  std::vector<int> displs(counts.size(), 0);
+  for (std::size_t proc = 1; proc < counts.size(); ++proc) {
+    displs[proc] = displs[proc - 1] + counts[proc - 1];
+  }
+  return displs;
+}
+
+std::vector<int> BuildNNZCounts(const MatrixCRS &matrix, const std::vector<int> &bounds) {
+  std::vector<int> counts(bounds.size() - 1ULL, 0);
+  for (std::size_t proc = 0; proc + 1 < bounds.size(); ++proc) {
+    counts[proc] = matrix.row_ptr[static_cast<std::size_t>(bounds[proc + 1])] -
+                   matrix.row_ptr[static_cast<std::size_t>(bounds[proc])];
+  }
+  return counts;
+}
+
+std::vector<double> PackComplexValues(const std::vector<std::complex<double>> &values) {
+  std::vector<double> packed(values.size() * 2ULL, 0.0);
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    packed[i * 2ULL] = values[i].real();
+    packed[i * 2ULL + 1ULL] = values[i].imag();
+  }
+  return packed;
+}
+
+void UnpackComplexValues(const std::vector<double> &packed, std::vector<std::complex<double>> &values) {
+  const std::size_t count = packed.size() / 2ULL;
+  values.resize(count);
+  for (std::size_t i = 0; i < count; ++i) {
+    values[i] = std::complex<double>(packed[i * 2ULL], packed[i * 2ULL + 1ULL]);
+  }
+}
+
+MatrixCRS ScatterRows(const MatrixCRS &matrix, const std::vector<int> &row_bounds, int rank, int proc_count) {
+  const std::vector<int> row_counts = BuildCountsFromBounds(row_bounds);
+  const std::vector<int> row_displs = BuildDisplacements(row_counts);
+  const std::vector<int> nnz_counts = BuildNNZCounts(matrix, row_bounds);
+  const std::vector<int> nnz_displs = BuildDisplacements(nnz_counts);
+
   MatrixCRS local;
-  local.rows = row_end - row_begin;
+  local.rows = row_counts[static_cast<std::size_t>(rank)];
   local.cols = matrix.cols;
   local.row_ptr.assign(static_cast<std::size_t>(local.rows) + 1ULL, 0);
+  local.col_index.resize(static_cast<std::size_t>(nnz_counts[static_cast<std::size_t>(rank)]));
 
-  const int nnz_begin = matrix.row_ptr[static_cast<std::size_t>(row_begin)];
-  const int nnz_end = matrix.row_ptr[static_cast<std::size_t>(row_end)];
+  std::vector<int> all_row_lengths;
+  std::vector<double> packed_values;
+  std::vector<int> packed_counts;
+  std::vector<int> packed_displs;
 
-  local.values.assign(matrix.values.begin() + nnz_begin, matrix.values.begin() + nnz_end);
-  local.col_index.assign(matrix.col_index.begin() + nnz_begin, matrix.col_index.begin() + nnz_end);
-
-  for (int row = 0; row < local.rows; ++row) {
-    local.row_ptr[static_cast<std::size_t>(row)] =
-        matrix.row_ptr[static_cast<std::size_t>(row_begin + row)] - nnz_begin;
+  if (rank == 0) {
+    all_row_lengths.resize(static_cast<std::size_t>(matrix.rows), 0);
+    for (int row = 0; row < matrix.rows; ++row) {
+      all_row_lengths[static_cast<std::size_t>(row)] =
+          matrix.row_ptr[static_cast<std::size_t>(row + 1)] - matrix.row_ptr[static_cast<std::size_t>(row)];
+    }
+    packed_values = PackComplexValues(matrix.values);
+    packed_counts.resize(static_cast<std::size_t>(proc_count), 0);
+    packed_displs.resize(static_cast<std::size_t>(proc_count), 0);
+    for (int proc = 0; proc < proc_count; ++proc) {
+      packed_counts[static_cast<std::size_t>(proc)] = nnz_counts[static_cast<std::size_t>(proc)] * 2;
+      packed_displs[static_cast<std::size_t>(proc)] = nnz_displs[static_cast<std::size_t>(proc)] * 2;
+    }
   }
-  local.row_ptr[static_cast<std::size_t>(local.rows)] = nnz_end - nnz_begin;
+
+  std::vector<int> local_row_lengths(static_cast<std::size_t>(local.rows), 0);
+  MPI_Scatterv(all_row_lengths.data(), row_counts.data(), row_displs.data(), MPI_INT, local_row_lengths.data(),
+               local.rows, MPI_INT, 0, MPI_COMM_WORLD);
+
+  const int local_nnz = nnz_counts[static_cast<std::size_t>(rank)];
+  MPI_Scatterv(matrix.col_index.data(), nnz_counts.data(), nnz_displs.data(), MPI_INT, local.col_index.data(),
+               local_nnz, MPI_INT, 0, MPI_COMM_WORLD);
+
+  std::vector<double> local_packed(static_cast<std::size_t>(local_nnz) * 2ULL, 0.0);
+  MPI_Scatterv(packed_values.data(), packed_counts.data(), packed_displs.data(), MPI_DOUBLE, local_packed.data(),
+               local_nnz * 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  UnpackComplexValues(local_packed, local.values);
+
+  int prefix = 0;
+  for (int row = 0; row < local.rows; ++row) {
+    local.row_ptr[static_cast<std::size_t>(row)] = prefix;
+    prefix += local_row_lengths[static_cast<std::size_t>(row)];
+  }
+  local.row_ptr[static_cast<std::size_t>(local.rows)] = prefix;
 
   return local;
 }
@@ -66,24 +161,16 @@ void BroadcastMatrix(MatrixCRS &matrix, int rank) {
   MPI_Bcast(matrix.col_index.data(), dims[2], MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(matrix.row_ptr.data(), matrix.rows + 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-  std::vector<double> real_parts(static_cast<std::size_t>(dims[2]), 0.0);
-  std::vector<double> imag_parts(static_cast<std::size_t>(dims[2]), 0.0);
-
+  std::vector<double> packed_values;
   if (rank == 0) {
-    for (int i = 0; i < dims[2]; ++i) {
-      real_parts[static_cast<std::size_t>(i)] = matrix.values[static_cast<std::size_t>(i)].real();
-      imag_parts[static_cast<std::size_t>(i)] = matrix.values[static_cast<std::size_t>(i)].imag();
-    }
+    packed_values = PackComplexValues(matrix.values);
+  } else {
+    packed_values.resize(static_cast<std::size_t>(dims[2]) * 2ULL, 0.0);
   }
 
-  MPI_Bcast(real_parts.data(), dims[2], MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  MPI_Bcast(imag_parts.data(), dims[2], MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
+  MPI_Bcast(packed_values.data(), dims[2] * 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   if (rank != 0) {
-    for (int i = 0; i < dims[2]; ++i) {
-      matrix.values[static_cast<std::size_t>(i)] =
-          std::complex<double>(real_parts[static_cast<std::size_t>(i)], imag_parts[static_cast<std::size_t>(i)]);
-    }
+    UnpackComplexValues(packed_values, matrix.values);
   }
 }
 
@@ -175,11 +262,10 @@ MatrixCRS MultiplyLocalOMP(const MatrixCRS &a, const MatrixCRS &b) {
   return result;
 }
 
-void GatherMatrix(const MatrixCRS &local, MatrixCRS &global, int rank, int size, int total_rows) {
-  std::vector<int> row_counts(static_cast<std::size_t>(size), 0);
-  const int local_rows = local.rows;
-  MPI_Gather(&local_rows, 1, MPI_INT, row_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-
+void GatherMatrix(const MatrixCRS &local, MatrixCRS &global, const std::vector<int> &row_bounds, int rank, int size,
+                  int total_rows) {
+  const std::vector<int> row_counts = BuildCountsFromBounds(row_bounds);
+  const std::vector<int> row_displs = BuildDisplacements(row_counts);
   std::vector<int> nnz_counts(static_cast<std::size_t>(size), 0);
   const int local_nnz = static_cast<int>(local.values.size());
   MPI_Gather(&local_nnz, 1, MPI_INT, nnz_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -190,45 +276,39 @@ void GatherMatrix(const MatrixCRS &local, MatrixCRS &global, int rank, int size,
         local.row_ptr[static_cast<std::size_t>(row + 1)] - local.row_ptr[static_cast<std::size_t>(row)];
   }
 
-  std::vector<int> row_displs;
   std::vector<int> nnz_displs;
   std::vector<int> gathered_row_lengths;
   std::vector<int> gathered_cols;
-  std::vector<double> gathered_real;
-  std::vector<double> gathered_imag;
+  std::vector<double> gathered_packed_values;
+  std::vector<int> packed_counts;
+  std::vector<int> packed_displs;
 
   if (rank == 0) {
-    row_displs.resize(static_cast<std::size_t>(size), 0);
     nnz_displs.resize(static_cast<std::size_t>(size), 0);
     for (int proc = 1; proc < size; ++proc) {
-      row_displs[static_cast<std::size_t>(proc)] =
-          row_displs[static_cast<std::size_t>(proc - 1)] + row_counts[static_cast<std::size_t>(proc - 1)];
       nnz_displs[static_cast<std::size_t>(proc)] =
           nnz_displs[static_cast<std::size_t>(proc - 1)] + nnz_counts[static_cast<std::size_t>(proc - 1)];
     }
 
     gathered_row_lengths.resize(static_cast<std::size_t>(total_rows), 0);
     gathered_cols.resize(static_cast<std::size_t>(std::accumulate(nnz_counts.begin(), nnz_counts.end(), 0)), 0);
-    gathered_real.resize(gathered_cols.size(), 0.0);
-    gathered_imag.resize(gathered_cols.size(), 0.0);
+    gathered_packed_values.resize(gathered_cols.size() * 2ULL, 0.0);
+    packed_counts.resize(static_cast<std::size_t>(size), 0);
+    packed_displs.resize(static_cast<std::size_t>(size), 0);
+    for (int proc = 0; proc < size; ++proc) {
+      packed_counts[static_cast<std::size_t>(proc)] = nnz_counts[static_cast<std::size_t>(proc)] * 2;
+      packed_displs[static_cast<std::size_t>(proc)] = nnz_displs[static_cast<std::size_t>(proc)] * 2;
+    }
   }
 
-  MPI_Gatherv(local_row_lengths.data(), local_rows, MPI_INT, gathered_row_lengths.data(), row_counts.data(),
+  MPI_Gatherv(local_row_lengths.data(), local.rows, MPI_INT, gathered_row_lengths.data(), row_counts.data(),
               row_displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Gatherv(local.col_index.data(), local_nnz, MPI_INT, gathered_cols.data(), nnz_counts.data(), nnz_displs.data(),
               MPI_INT, 0, MPI_COMM_WORLD);
 
-  std::vector<double> local_real(static_cast<std::size_t>(local_nnz), 0.0);
-  std::vector<double> local_imag(static_cast<std::size_t>(local_nnz), 0.0);
-  for (int i = 0; i < local_nnz; ++i) {
-    local_real[static_cast<std::size_t>(i)] = local.values[static_cast<std::size_t>(i)].real();
-    local_imag[static_cast<std::size_t>(i)] = local.values[static_cast<std::size_t>(i)].imag();
-  }
-
-  MPI_Gatherv(local_real.data(), local_nnz, MPI_DOUBLE, gathered_real.data(), nnz_counts.data(), nnz_displs.data(),
-              MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  MPI_Gatherv(local_imag.data(), local_nnz, MPI_DOUBLE, gathered_imag.data(), nnz_counts.data(), nnz_displs.data(),
-              MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  const std::vector<double> local_packed_values = PackComplexValues(local.values);
+  MPI_Gatherv(local_packed_values.data(), local_nnz * 2, MPI_DOUBLE, gathered_packed_values.data(),
+              packed_counts.data(), packed_displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   if (rank != 0) {
     return;
@@ -243,11 +323,7 @@ void GatherMatrix(const MatrixCRS &local, MatrixCRS &global, int rank, int size,
   global.row_ptr[static_cast<std::size_t>(total_rows)] = prefix;
 
   global.col_index = std::move(gathered_cols);
-  global.values.resize(static_cast<std::size_t>(prefix));
-  for (int i = 0; i < prefix; ++i) {
-    global.values[static_cast<std::size_t>(i)] =
-        std::complex<double>(gathered_real[static_cast<std::size_t>(i)], gathered_imag[static_cast<std::size_t>(i)]);
-  }
+  UnpackComplexValues(gathered_packed_values, global.values);
 }
 
 }  // namespace
@@ -319,7 +395,6 @@ bool ErmakovASparMatMultALL::RunImpl() {
   }
 
   BroadcastMatrix(b_, rank);
-  BroadcastMatrix(a_, rank);
 
   c_.rows = a_.rows;
   c_.cols = b_.cols;
@@ -327,11 +402,16 @@ bool ErmakovASparMatMultALL::RunImpl() {
   c_.col_index.clear();
   c_.row_ptr.assign(static_cast<std::size_t>(c_.rows) + 1ULL, 0);
 
-  const RowChunk chunk = ResolveRowChunk(rank, size, a_.rows);
-  const MatrixCRS local_a = SliceRows(a_, chunk.row_begin, chunk.row_end);
+  std::vector<int> row_bounds(static_cast<std::size_t>(size) + 1ULL, 0);
+  if (rank == 0) {
+    row_bounds = BuildRowBounds(a_, size);
+  }
+  MPI_Bcast(row_bounds.data(), size + 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+  const MatrixCRS local_a = ScatterRows(a_, row_bounds, rank, size);
   const MatrixCRS local_c = MultiplyLocalOMP(local_a, b_);
 
-  GatherMatrix(local_c, c_, rank, size, a_.rows);
+  GatherMatrix(local_c, c_, row_bounds, rank, size, a_.rows);
   BroadcastMatrix(c_, rank);
   MPI_Barrier(MPI_COMM_WORLD);
   return true;
