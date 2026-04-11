@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <tuple>
@@ -17,6 +18,21 @@
 #include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
+
+namespace {
+
+std::uint32_t MakeSeed(int n, const std::string &desc) {
+  std::uint32_t seed = 2166136261u;
+  for (unsigned char ch : desc) {
+    seed ^= ch;
+    seed *= 16777619u;
+  }
+  seed ^= static_cast<std::uint32_t>(n);
+  seed *= 16777619u;
+  return seed;
+}
+
+}  // namespace
 
 class TochilinEHoarSortSimMerRunFuncTests : public ppc::util::BaseRunFuncTests<InType, OutType, TestType> {
  public:
@@ -47,7 +63,7 @@ class TochilinEHoarSortSimMerRunFuncTests : public ppc::util::BaseRunFuncTests<I
       }
     } else {
       if (n > 0) {
-        std::mt19937 gen(std::random_device{}());
+        std::mt19937 gen(MakeSeed(n, desc));
         std::uniform_int_distribution<> dis(-1000, 1000);
         for (int i = 0; i < n; ++i) {
           input_data_[static_cast<std::size_t>(i)] = dis(gen);
