@@ -23,9 +23,6 @@ class TochilinEHoarSortSimMerALL : public BaseTask {
 
   static void QuickSortOMP(std::vector<int> &arr, int low, int high, int depth_limit);
   static std::pair<int, int> Partition(std::vector<int> &arr, int l, int r);
-  static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
-  static std::vector<int> MergeSortedChunks(const std::vector<int> &data, const std::vector<int> &counts,
-                                            const std::vector<int> &displs);
 };
 
 }  // namespace tochilin_e_hoar_sort_sim_mer
