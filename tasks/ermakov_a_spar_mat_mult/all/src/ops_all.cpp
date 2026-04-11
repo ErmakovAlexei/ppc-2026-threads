@@ -95,10 +95,10 @@ void UnpackComplexValues(const std::vector<double> &packed, std::vector<std::com
   }
 }
 
-MatrixCRS ScatterRows(const MatrixCRS &matrix, const std::vector<int> &row_bounds, int rank, int proc_count) {
+MatrixCRS ScatterRows(const MatrixCRS &matrix, const std::vector<int> &row_bounds, const std::vector<int> &nnz_counts,
+                      int rank, int proc_count) {
   const std::vector<int> row_counts = BuildCountsFromBounds(row_bounds);
   const std::vector<int> row_displs = BuildDisplacements(row_counts);
-  const std::vector<int> nnz_counts = BuildNNZCounts(matrix, row_bounds);
   const std::vector<int> nnz_displs = BuildDisplacements(nnz_counts);
 
   MatrixCRS local;
@@ -407,12 +407,15 @@ bool ErmakovASparMatMultALL::RunImpl() {
   c_.row_ptr.assign(static_cast<std::size_t>(c_.rows) + 1ULL, 0);
 
   std::vector<int> row_bounds(static_cast<std::size_t>(size) + 1ULL, 0);
+  std::vector<int> nnz_counts(static_cast<std::size_t>(size), 0);
   if (rank == 0) {
     row_bounds = BuildRowBounds(a_, size);
+    nnz_counts = BuildNNZCounts(a_, row_bounds);
   }
   MPI_Bcast(row_bounds.data(), size + 1, MPI_INT, 0, MPI_COMM_WORLD);
+  MPI_Bcast(nnz_counts.data(), size, MPI_INT, 0, MPI_COMM_WORLD);
 
-  const MatrixCRS local_a = ScatterRows(a_, row_bounds, rank, size);
+  const MatrixCRS local_a = ScatterRows(a_, row_bounds, nnz_counts, rank, size);
   const MatrixCRS local_c = MultiplyLocalOMP(local_a, b_);
 
   GatherMatrix(local_c, c_, row_bounds, rank, size, a_.rows);
