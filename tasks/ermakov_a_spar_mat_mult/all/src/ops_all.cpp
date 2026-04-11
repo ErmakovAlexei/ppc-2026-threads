@@ -20,6 +20,10 @@ struct LocalRowData {
 };
 
 std::vector<int> BuildRowBounds(const MatrixCRS &matrix, int proc_count) {
+  if (proc_count <= 0) {
+    return {};
+  }
+
   std::vector<int> bounds(static_cast<std::size_t>(proc_count) + 1ULL, 0);
   bounds.back() = matrix.rows;
 
