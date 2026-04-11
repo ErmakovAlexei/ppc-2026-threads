@@ -82,7 +82,9 @@ void TochilinEHoarSortSimMerALL::QuickSortOMP(std::vector<int> &arr, int low, in
       continue;
     }
 
-    const auto [i, j] = Partition(arr, l, r);
+    const std::pair<int, int> bounds = Partition(arr, l, r);
+    int i = bounds.first;
+    int j = bounds.second;
 
     if (depth_limit > 0) {
 #pragma omp task default(none) shared(arr) firstprivate(l, j, depth_limit)
