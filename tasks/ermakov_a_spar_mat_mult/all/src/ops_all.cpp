@@ -3,9 +3,11 @@
 #include <mpi.h>
 
 #include <algorithm>
+#include <array>
 #include <complex>
 #include <cstddef>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
@@ -37,7 +39,7 @@ std::vector<int> BuildRowBounds(const MatrixCRS &matrix, int proc_count) {
 
   int next_proc = 1;
   for (int row = 0; row < matrix.rows && next_proc < proc_count; ++row) {
-    const int prefix_nnz = matrix.row_ptr[static_cast<std::size_t>(row + 1)];
+    const int prefix_nnz = matrix.row_ptr[static_cast<std::size_t>(row) + 1ULL];
     const int target_nnz = (next_proc * total_nnz) / proc_count;
     if (prefix_nnz >= target_nnz) {
       bounds[static_cast<std::size_t>(next_proc)] = row + 1;
@@ -82,7 +84,7 @@ std::vector<double> PackComplexValues(const std::vector<std::complex<double>> &v
   std::vector<double> packed(values.size() * 2ULL, 0.0);
   for (std::size_t i = 0; i < values.size(); ++i) {
     packed[i * 2ULL] = values[i].real();
-    packed[i * 2ULL + 1ULL] = values[i].imag();
+    packed[(i * 2ULL) + 1ULL] = values[i].imag();
   }
   return packed;
 }
@@ -91,7 +93,7 @@ void UnpackComplexValues(const std::vector<double> &packed, std::vector<std::com
   const std::size_t count = packed.size() / 2ULL;
   values.resize(count);
   for (std::size_t i = 0; i < count; ++i) {
-    values[i] = std::complex<double>(packed[i * 2ULL], packed[i * 2ULL + 1ULL]);
+    values[i] = std::complex<double>(packed[i * 2ULL], packed[(i * 2ULL) + 1ULL]);
   }
 }
 
@@ -116,7 +118,7 @@ MatrixCRS ScatterRows(const MatrixCRS &matrix, const std::vector<int> &row_bound
     all_row_lengths.resize(static_cast<std::size_t>(matrix.rows), 0);
     for (int row = 0; row < matrix.rows; ++row) {
       all_row_lengths[static_cast<std::size_t>(row)] =
-          matrix.row_ptr[static_cast<std::size_t>(row + 1)] - matrix.row_ptr[static_cast<std::size_t>(row)];
+          matrix.row_ptr[static_cast<std::size_t>(row) + 1ULL] - matrix.row_ptr[static_cast<std::size_t>(row)];
     }
     packed_values = PackComplexValues(matrix.values);
     packed_counts.resize(static_cast<std::size_t>(proc_count), 0);
@@ -151,8 +153,8 @@ MatrixCRS ScatterRows(const MatrixCRS &matrix, const std::vector<int> &row_bound
 }
 
 void BroadcastMatrix(MatrixCRS &matrix, int rank) {
-  int dims[3] = {matrix.rows, matrix.cols, static_cast<int>(matrix.values.size())};
-  MPI_Bcast(dims, 3, MPI_INT, 0, MPI_COMM_WORLD);
+  std::array<int, 3> dims = {matrix.rows, matrix.cols, static_cast<int>(matrix.values.size())};
+  MPI_Bcast(dims.data(), static_cast<int>(dims.size()), MPI_INT, 0, MPI_COMM_WORLD);
 
   if (rank != 0) {
     matrix.rows = dims[0];
@@ -183,12 +185,12 @@ void AccumulateRowProducts(const MatrixCRS &a, const MatrixCRS &b, int row_index
                            std::vector<int> &used_cols) {
   used_cols.clear();
 
-  for (int ak = a.row_ptr[static_cast<std::size_t>(row_index)]; ak < a.row_ptr[static_cast<std::size_t>(row_index + 1)];
-       ++ak) {
+  for (int ak = a.row_ptr[static_cast<std::size_t>(row_index)];
+       ak < a.row_ptr[static_cast<std::size_t>(row_index) + 1ULL]; ++ak) {
     const int b_row = a.col_index[static_cast<std::size_t>(ak)];
     const auto a_val = a.values[static_cast<std::size_t>(ak)];
 
-    for (int bk = b.row_ptr[static_cast<std::size_t>(b_row)]; bk < b.row_ptr[static_cast<std::size_t>(b_row + 1)];
+    for (int bk = b.row_ptr[static_cast<std::size_t>(b_row)]; bk < b.row_ptr[static_cast<std::size_t>(b_row) + 1ULL];
          ++bk) {
       const int col = b.col_index[static_cast<std::size_t>(bk)];
       const auto product = a_val * b.values[static_cast<std::size_t>(bk)];
@@ -277,7 +279,7 @@ void GatherMatrix(const MatrixCRS &local, MatrixCRS &global, const std::vector<i
   std::vector<int> local_row_lengths(static_cast<std::size_t>(local.rows), 0);
   for (int row = 0; row < local.rows; ++row) {
     local_row_lengths[static_cast<std::size_t>(row)] =
-        local.row_ptr[static_cast<std::size_t>(row + 1)] - local.row_ptr[static_cast<std::size_t>(row)];
+        local.row_ptr[static_cast<std::size_t>(row) + 1ULL] - local.row_ptr[static_cast<std::size_t>(row)];
   }
 
   std::vector<int> nnz_displs;
@@ -357,7 +359,7 @@ bool ErmakovASparMatMultALL::ValidateMatrix(const MatrixCRS &m) {
   }
 
   for (int row = 0; row < m.rows; ++row) {
-    if (m.row_ptr[static_cast<std::size_t>(row)] > m.row_ptr[static_cast<std::size_t>(row + 1)]) {
+    if (m.row_ptr[static_cast<std::size_t>(row)] > m.row_ptr[static_cast<std::size_t>(row) + 1ULL]) {
       return false;
     }
   }

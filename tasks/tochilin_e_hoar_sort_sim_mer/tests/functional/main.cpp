@@ -22,13 +22,13 @@ namespace tochilin_e_hoar_sort_sim_mer {
 namespace {
 
 std::uint32_t MakeSeed(int n, const std::string &desc) {
-  std::uint32_t seed = 2166136261u;
+  std::uint32_t seed = 2166136261U;
   for (unsigned char ch : desc) {
     seed ^= ch;
-    seed *= 16777619u;
+    seed *= 16777619U;
   }
   seed ^= static_cast<std::uint32_t>(n);
-  seed *= 16777619u;
+  seed *= 16777619U;
   return seed;
 }
 

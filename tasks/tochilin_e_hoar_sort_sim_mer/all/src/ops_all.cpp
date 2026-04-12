@@ -4,7 +4,9 @@
 #include <omp.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
@@ -16,7 +18,8 @@ namespace {
 std::vector<int> BuildCounts(int total_size, int proc_count) {
   std::vector<int> counts(static_cast<std::size_t>(proc_count), 0);
   for (int rank = 0; rank < proc_count; ++rank) {
-    counts[static_cast<std::size_t>(rank)] = ((rank + 1) * total_size) / proc_count - (rank * total_size) / proc_count;
+    counts[static_cast<std::size_t>(rank)] =
+        (((rank + 1) * total_size) / proc_count) - ((rank * total_size) / proc_count);
   }
   return counts;
 }
