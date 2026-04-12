@@ -21,8 +21,8 @@ namespace {
 
 using DenseMatrix = std::vector<std::vector<std::complex<double>>>;
 
-constexpr std::uint32_t kPerfSeedA = 0x13579BDFu;
-constexpr std::uint32_t kPerfSeedB = 0x2468ACE0u;
+constexpr std::uint32_t kPerfSeedA = 0x13579BDFU;
+constexpr std::uint32_t kPerfSeedB = 0x2468ACE0U;
 
 DenseMatrix MakeRandomDense(int n, double density, std::uint32_t seed) {
   DenseMatrix m(n, std::vector<std::complex<double>>(n, {0.0, 0.0}));
