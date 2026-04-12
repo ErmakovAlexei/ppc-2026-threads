@@ -28,7 +28,8 @@ class TochilinEHoarSortSimMerRunPerfTests : public ppc::util::BaseRunPerfTests<I
 
   void SetUp() override {
     input_data.resize(static_cast<std::size_t>(k_count));
-    std::mt19937 gen(kPerfSeed);
+    std::seed_seq seed_seq{static_cast<std::uint32_t>(k_count), kPerfSeed};
+    std::mt19937 gen(seed_seq);
     std::uniform_int_distribution<> dis(-10000, 10000);
 
     for (int i = 0; i < k_count; ++i) {
