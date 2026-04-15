@@ -306,7 +306,7 @@ for i in [0 .. m):
 3. MPI Forum. MPI: A Message-Passing Interface Standard, Version 4.0, 2021.
 4. cppreference.com — `std::thread`, `std::complex`, `std::ranges::sort`.
 5. Saad Y. Iterative Methods for Sparse Linear Systems. SIAM, 2003.
-6. Документация преподавателей: https://learning-process.github.io/parallel_programming_slides/
+6. Документация преподавателей: <https://learning-process.github.io/parallel_programming_slides/>
 7. Лекции Сысоев А. В., Нестеров А., ННГУ, 2026.
 
 ---
