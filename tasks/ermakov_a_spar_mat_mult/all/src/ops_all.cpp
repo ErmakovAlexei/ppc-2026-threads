@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
+#include "task/include/task.hpp"
 #include "util/include/util.hpp"
 
 namespace ermakov_a_spar_mat_mult {
