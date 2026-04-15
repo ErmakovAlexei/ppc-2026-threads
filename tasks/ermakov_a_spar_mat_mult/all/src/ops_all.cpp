@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "ermakov_a_spar_mat_mult/common/include/common.hpp"
+#include "util/include/util.hpp"
 
 namespace ermakov_a_spar_mat_mult {
 
@@ -234,8 +235,9 @@ MatrixCRS MultiplyLocalOMP(const MatrixCRS &a, const MatrixCRS &b) {
   }
 
   std::vector<LocalRowData> rows_data(static_cast<std::size_t>(a.rows));
+  const int thread_count = std::max(1, std::min(ppc::util::GetNumThreads(), a.rows));
 
-#pragma omp parallel default(none) shared(a, b, rows_data)
+#pragma omp parallel default(none) shared(a, b, rows_data) num_threads(thread_count) if (thread_count > 1)
   {
     std::vector<std::complex<double>> row_vals(static_cast<std::size_t>(b.cols), std::complex<double>(0.0, 0.0));
     std::vector<int> row_mark(static_cast<std::size_t>(b.cols), -1);
@@ -421,6 +423,19 @@ bool ErmakovASparMatMultALL::RunImpl() {
   const MatrixCRS local_c = MultiplyLocalOMP(local_a, b_);
 
   GatherMatrix(local_c, c_, row_bounds, rank, size, a_.rows);
+
+  if (GetStateOfTesting() == ppc::task::StateOfTesting::kPerf) {
+    if (rank != 0) {
+      c_.rows = a_.rows;
+      c_.cols = b_.cols;
+      c_.values.clear();
+      c_.col_index.clear();
+      c_.row_ptr.assign(static_cast<std::size_t>(c_.rows) + 1ULL, 0);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    return true;
+  }
+
   BroadcastMatrix(c_, rank);
   MPI_Barrier(MPI_COMM_WORLD);
   return true;

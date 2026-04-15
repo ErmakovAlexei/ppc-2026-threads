@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -19,14 +18,14 @@ namespace ermakov_a_spar_mat_mult {
 
 namespace {
 
-using DenseMatrix = std::vector<std::vector<std::complex<double>>>;
-
 constexpr std::uint32_t kPerfSeedA = 0x13579BDFU;
 constexpr std::uint32_t kPerfSeedB = 0x2468ACE0U;
 
-DenseMatrix MakeRandomDense(int n, double density, std::uint32_t seed) {
-  DenseMatrix m(n, std::vector<std::complex<double>>(n, {0.0, 0.0}));
-
+MatrixCRS MakeRandomCRS(int n, double density, std::uint32_t seed) {
+  MatrixCRS matrix;
+  matrix.rows = n;
+  matrix.cols = n;
+  matrix.row_ptr.resize(static_cast<std::size_t>(n) + 1ULL, 0);
   std::mt19937 gen(seed);
   std::uniform_real_distribution<double> dis_val(-5.0, 5.0);
   std::uniform_real_distribution<double> dis_prob(0.0, 1.0);
@@ -34,36 +33,13 @@ DenseMatrix MakeRandomDense(int n, double density, std::uint32_t seed) {
   for (int i = 0; i < n; ++i) {
     for (int j = 0; j < n; ++j) {
       if (dis_prob(gen) < density) {
-        m[i][j] = {dis_val(gen), dis_val(gen)};
+        matrix.values.emplace_back(dis_val(gen), dis_val(gen));
+        matrix.col_index.push_back(j);
       }
     }
+    matrix.row_ptr[static_cast<std::size_t>(i) + 1ULL] = static_cast<int>(matrix.values.size());
   }
-  return m;
-}
-
-MatrixCRS DenseToCRS(const DenseMatrix &m, double eps = 1e-12) {
-  MatrixCRS r;
-
-  const int rows = static_cast<int>(m.size());
-  const int cols = (rows != 0) ? static_cast<int>(m[0].size()) : 0;
-
-  r.rows = rows;
-  r.cols = cols;
-  r.row_ptr.resize(rows + 1);
-  r.row_ptr[0] = 0;
-
-  for (int i = 0; i < rows; ++i) {
-    for (int j = 0; j < cols; ++j) {
-      const auto v = m[i][j];
-      if (std::abs(v.real()) > eps || std::abs(v.imag()) > eps) {
-        r.values.push_back(v);
-        r.col_index.push_back(j);
-      }
-    }
-    r.row_ptr[i + 1] = static_cast<int>(r.values.size());
-  }
-
-  return r;
+  return matrix;
 }
 
 }  // namespace
@@ -76,11 +52,8 @@ class ErmakovARunPerfTestSparMatMult : public ppc::util::BaseRunPerfTests<InType
   void SetUp() override {
     const double density = 0.001;
 
-    auto a_dense = MakeRandomDense(k_count, density, kPerfSeedA);
-    auto b_dense = MakeRandomDense(k_count, density, kPerfSeedB);
-
-    input_data.A = DenseToCRS(a_dense);
-    input_data.B = DenseToCRS(b_dense);
+    input_data.A = MakeRandomCRS(k_count, density, kPerfSeedA);
+    input_data.B = MakeRandomCRS(k_count, density, kPerfSeedB);
   }
 
   bool CheckTestOutputData(OutType &output_data) final {
