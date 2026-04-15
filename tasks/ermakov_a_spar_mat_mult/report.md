@@ -1,9 +1,10 @@
 # Умножение разреженных комплексных матриц в формате CRS
 
 - Студент: Ермаков Алексей Викторович
+- Преподаватели: Сысоев А. В., Нестеров А.
 - Группа: 3823Б1ПР3
 - Технологии: SEQ, OMP, TBB, STL, ALL (MPI + OMP)
-- Вариант: 1
+- Вариант: 6
 
 ---
 
@@ -300,15 +301,13 @@ for i in [0 .. m):
 
 ## 9. Источники
 
-1. OpenMP API Specification.  
-   [https://www.openmp.org/specifications/](https://www.openmp.org/specifications/)
-2. Intel oneAPI Threading Building Blocks Documentation.  
-   [https://www.intel.com/content/www/us/en/docs/onetbb/](https://www.intel.com/content/www/us/en/docs/onetbb/)
-3. MPI Forum. MPI: A Message-Passing Interface Standard.  
-   [https://www.mpi-forum.org/docs/](https://www.mpi-forum.org/docs/)
-4. cppreference.com — `std::thread`, `std::complex`, `std::ranges::sort`.  
-   [https://en.cppreference.com/](https://en.cppreference.com/)
+1. OpenMP API Specification.
+2. Intel oneAPI Threading Building Blocks Documentation.
+3. MPI Forum. MPI: A Message-Passing Interface Standard, Version 4.0, 2021.
+4. cppreference.com — `std::thread`, `std::complex`, `std::ranges::sort`.
 5. Saad Y. Iterative Methods for Sparse Linear Systems. SIAM, 2003.
+6. Документация преподавателей: https://learning-process.github.io/parallel_programming_slides/
+7. Лекции Сысоев А. В., Нестеров А., ННГУ, 2026.
 
 ---
 
