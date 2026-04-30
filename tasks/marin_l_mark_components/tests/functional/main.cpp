@@ -2,15 +2,18 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "marin_l_mark_components/all/include/ops_all.hpp"
 #include "marin_l_mark_components/common/include/common.hpp"
 #include "marin_l_mark_components/omp/include/ops_omp.hpp"
 #include "marin_l_mark_components/seq/include/ops_seq.hpp"
+#include "marin_l_mark_components/stl/include/ops_stl.hpp"
 #include "marin_l_mark_components/tbb/include/ops_tbb.hpp"
 #include "util/include/func_test_util.hpp"
 #include "util/include/util.hpp"
@@ -167,6 +170,19 @@ void FillRandom(Image &img, int height, int width, std::mt19937 &gen, std::unifo
   }
 }
 
+std::uint32_t MakeSeed(int width, int height, const std::string &scenario_name) {
+  std::uint32_t seed = 2166136261U;
+  seed ^= static_cast<std::uint32_t>(width);
+  seed *= 16777619U;
+  seed ^= static_cast<std::uint32_t>(height);
+  seed *= 16777619U;
+  for (unsigned char ch : scenario_name) {
+    seed ^= ch;
+    seed *= 16777619U;
+  }
+  return seed;
+}
+
 }  // namespace
 
 class MarinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, OutType, TestType> {
@@ -186,8 +202,7 @@ class MarinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, O
 
     input_data_.binary = MakeImage(height, width);
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    std::mt19937 gen(MakeSeed(width, height, scenario_name));
     std::uniform_real_distribution<double> probability_dist(0.0, 1.0);
 
     if (scenario_name == "SingleBlob") {
@@ -229,6 +244,8 @@ const std::array<TestType, 6> kTestParams{std::make_tuple(5, 5, "SingleBlob"), s
                                           std::make_tuple(15, 10, "Random"),   std::make_tuple(4, 6, "TwoBlocks")};
 
 const auto kTestTasksList = std::tuple_cat(
+    ppc::util::AddFuncTask<MarinLMarkComponentsALL, InType>(kTestParams, PPC_SETTINGS_marin_l_mark_components),
+    ppc::util::AddFuncTask<MarinLMarkComponentsSTL, InType>(kTestParams, PPC_SETTINGS_marin_l_mark_components),
     ppc::util::AddFuncTask<MarinLMarkComponentsTBB, InType>(kTestParams, PPC_SETTINGS_marin_l_mark_components),
     ppc::util::AddFuncTask<MarinLMarkComponentsOMP, InType>(kTestParams, PPC_SETTINGS_marin_l_mark_components),
     ppc::util::AddFuncTask<MarinLMarkComponentsSEQ, InType>(kTestParams, PPC_SETTINGS_marin_l_mark_components));

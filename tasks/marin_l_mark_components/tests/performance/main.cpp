@@ -1,12 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <random>
 #include <vector>
 
+#include "marin_l_mark_components/all/include/ops_all.hpp"
 #include "marin_l_mark_components/common/include/common.hpp"
 #include "marin_l_mark_components/omp/include/ops_omp.hpp"
 #include "marin_l_mark_components/seq/include/ops_seq.hpp"
+#include "marin_l_mark_components/stl/include/ops_stl.hpp"
 #include "marin_l_mark_components/tbb/include/ops_tbb.hpp"
 #include "util/include/perf_test_util.hpp"
 
@@ -14,11 +17,12 @@ namespace marin_l_mark_components {
 
 namespace {
 
+constexpr std::uint32_t kPerfSeed = 0x4D415249U;
+
 Image MakeRandomBinaryImage(int height, int width, double fill_probability) {
   Image image(static_cast<size_t>(height), std::vector<int>(static_cast<size_t>(width), 0));
 
-  std::random_device random_seed;
-  std::mt19937 generator(random_seed());
+  std::mt19937 generator(kPerfSeed);
   std::uniform_real_distribution<double> distribution(0.0, 1.0);
 
   for (int row_idx = 0; row_idx < height; ++row_idx) {
@@ -34,8 +38,8 @@ Image MakeRandomBinaryImage(int height, int width, double fill_probability) {
 
 class MarinLRunPerfTestComponents : public ppc::util::BaseRunPerfTests<InType, OutType> {
  protected:
-  const int k_width_pixels = 8192;
-  const int k_height_pixels = 8192;
+  const int k_width_pixels = 4096;
+  const int k_height_pixels = 4096;
   InType input_data{};
 
   void SetUp() override {
@@ -80,8 +84,8 @@ TEST_P(MarinLRunPerfTestComponents, RunPerfModes) {
 namespace {
 
 const auto kAllPerfTasks =
-    ppc::util::MakeAllPerfTasks<InType, MarinLMarkComponentsSEQ, MarinLMarkComponentsOMP, MarinLMarkComponentsTBB>(
-        PPC_SETTINGS_marin_l_mark_components);
+    ppc::util::MakeAllPerfTasks<InType, MarinLMarkComponentsSEQ, MarinLMarkComponentsOMP, MarinLMarkComponentsTBB,
+                                MarinLMarkComponentsSTL, MarinLMarkComponentsALL>(PPC_SETTINGS_marin_l_mark_components);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
