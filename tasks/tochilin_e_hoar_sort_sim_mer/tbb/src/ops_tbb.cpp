@@ -6,9 +6,9 @@
 #include <vector>
 
 #include "oneapi/tbb/blocked_range.h"
-#include "oneapi/tbb/info.h"
 #include "oneapi/tbb/parallel_for.h"
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
+#include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
@@ -16,6 +16,10 @@ namespace {
 
 constexpr std::size_t kMinPartSize = 4096;
 constexpr int kOversubscription = 4;
+
+int ResolveConcurrency() {
+  return std::max(1, ppc::util::GetNumThreads());
+}
 
 }  // namespace
 
@@ -87,7 +91,7 @@ int TochilinEHoarSortSimMerTBB::ResolvePartCount(std::size_t size) {
     return 1;
   }
 
-  const int concurrency = std::max(1, tbb::info::default_concurrency());
+  const int concurrency = ResolveConcurrency();
   const int preferred_parts = concurrency * kOversubscription;
   const int max_parts_by_size = static_cast<int>(size / kMinPartSize);
   return std::max(1, std::min(preferred_parts, max_parts_by_size));
@@ -98,7 +102,7 @@ std::size_t TochilinEHoarSortSimMerTBB::ResolveGrainSize(std::size_t task_count)
     return 1;
   }
 
-  const auto concurrency = static_cast<std::size_t>(std::max(1, tbb::info::default_concurrency()));
+  const auto concurrency = static_cast<std::size_t>(ResolveConcurrency());
   return std::max<std::size_t>(1, task_count / (concurrency * kOversubscription));
 }
 

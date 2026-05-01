@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
+#include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
@@ -103,11 +104,12 @@ bool TochilinEHoarSortSimMerOMP::RunImpl() {
   }
 
   const auto mid = static_cast<std::vector<int>::difference_type>(data.size() / 2);
+  const int thread_count = std::max(1, ppc::util::GetNumThreads());
 
   std::vector<int> left(data.begin(), data.begin() + mid);
   std::vector<int> right(data.begin() + mid, data.end());
 
-#pragma omp parallel default(none) shared(left, right)
+#pragma omp parallel default(none) shared(left, right) num_threads(thread_count) if (thread_count > 1)
   {
 #pragma omp single
     {

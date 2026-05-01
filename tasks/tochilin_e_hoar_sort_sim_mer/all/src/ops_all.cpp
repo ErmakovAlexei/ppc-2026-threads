@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
+#include "util/include/util.hpp"
 
 namespace tochilin_e_hoar_sort_sim_mer {
 
@@ -152,7 +153,8 @@ bool TochilinEHoarSortSimMerALL::RunImpl() {
                counts[static_cast<std::size_t>(rank)], MPI_INT, 0, MPI_COMM_WORLD);
 
   if (!local_data.empty()) {
-#pragma omp parallel default(none) shared(local_data)
+    const int thread_count = std::max(1, ppc::util::GetNumThreads());
+#pragma omp parallel default(none) shared(local_data) num_threads(thread_count) if (thread_count > 1)
     {
 #pragma omp single
       QuickSortOMP(local_data, 0, static_cast<int>(local_data.size()) - 1, 3);

@@ -24,8 +24,13 @@ class TochilinEHoarSortSimMerSTL : public BaseTask {
 
   static void QuickSortSequential(std::vector<int> &arr, int low, int high);
   static std::pair<int, int> Partition(std::vector<int> &arr, int l, int r);
-  static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
-  static bool ShouldRunParallel(std::size_t size);
+  static int ResolvePartCount(std::size_t size);
+  static std::vector<std::size_t> BuildBoundaries(std::size_t size, int part_count);
+  static void SortParts(std::vector<int> &data, const std::vector<std::size_t> &boundaries);
+  static void MergeRanges(const std::vector<int> &src, std::vector<int> &dst, std::size_t left, std::size_t mid,
+                          std::size_t right);
+  static std::vector<std::size_t> MergePass(const std::vector<int> &src, std::vector<int> &dst,
+                                            const std::vector<std::size_t> &current_boundaries);
 };
 
 }  // namespace tochilin_e_hoar_sort_sim_mer
