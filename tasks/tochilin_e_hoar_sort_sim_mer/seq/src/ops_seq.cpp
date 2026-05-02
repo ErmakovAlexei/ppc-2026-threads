@@ -76,9 +76,6 @@ std::vector<int> TochilinEHoarSortSimMerSEQ::MergeSortedVectors(const std::vecto
 
 bool TochilinEHoarSortSimMerSEQ::RunImpl() {
   auto &data = GetOutput();
-  if (data.empty()) {
-    return false;
-  }
 
   const auto mid = static_cast<std::vector<int>::difference_type>(data.size() / 2);
 
