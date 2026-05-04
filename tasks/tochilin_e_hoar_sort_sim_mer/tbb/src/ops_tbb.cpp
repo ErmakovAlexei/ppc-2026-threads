@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "oneapi/tbb/blocked_range.h"
+#include "oneapi/tbb/global_control.h"
 #include "oneapi/tbb/parallel_for.h"
 #include "tochilin_e_hoar_sort_sim_mer/common/include/common.hpp"
 #include "util/include/util.hpp"
@@ -177,6 +178,9 @@ bool TochilinEHoarSortSimMerTBB::RunImpl() {
   if (data.empty()) {
     return false;
   }
+
+  const tbb::global_control control(tbb::global_control::max_allowed_parallelism,
+                                    static_cast<std::size_t>(ResolveConcurrency()));
 
   const int part_count = ResolvePartCount(data.size());
 
