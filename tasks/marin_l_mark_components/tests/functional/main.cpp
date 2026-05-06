@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
+#include <mpi.h>
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <random>
 #include <string>
 #include <tuple>
@@ -170,19 +170,6 @@ void FillRandom(Image &img, int height, int width, std::mt19937 &gen, std::unifo
   }
 }
 
-std::uint32_t MakeSeed(int width, int height, const std::string &scenario_name) {
-  std::uint32_t seed = 2166136261U;
-  seed ^= static_cast<std::uint32_t>(width);
-  seed *= 16777619U;
-  seed ^= static_cast<std::uint32_t>(height);
-  seed *= 16777619U;
-  for (unsigned char ch : scenario_name) {
-    seed ^= ch;
-    seed *= 16777619U;
-  }
-  return seed;
-}
-
 }  // namespace
 
 class MarinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, OutType, TestType> {
@@ -201,20 +188,46 @@ class MarinLRunFuncTestComponents : public ppc::util::BaseRunFuncTests<InType, O
     const std::string &scenario_name = std::get<2>(params);
 
     input_data_.binary = MakeImage(height, width);
+    int rank = 0;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    std::mt19937 gen(MakeSeed(width, height, scenario_name));
-    std::uniform_real_distribution<double> probability_dist(0.0, 1.0);
+    if (rank == 0) {
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<double> probability_dist(0.0, 1.0);
 
-    if (scenario_name == "SingleBlob") {
-      FillSingleBlob(input_data_.binary, height, width);
-    } else if (scenario_name == "TwoBlocks") {
-      FillTwoBlocks(input_data_.binary, height, width);
-    } else if (scenario_name == "Checker") {
-      FillChecker(input_data_.binary, height, width);
-    } else if (scenario_name == "Diagonal") {
-      FillDiagonal(input_data_.binary, height, width);
-    } else if (scenario_name == "Random") {
-      FillRandom(input_data_.binary, height, width, gen, probability_dist);
+      if (scenario_name == "SingleBlob") {
+        FillSingleBlob(input_data_.binary, height, width);
+      } else if (scenario_name == "TwoBlocks") {
+        FillTwoBlocks(input_data_.binary, height, width);
+      } else if (scenario_name == "Checker") {
+        FillChecker(input_data_.binary, height, width);
+      } else if (scenario_name == "Diagonal") {
+        FillDiagonal(input_data_.binary, height, width);
+      } else if (scenario_name == "Random") {
+        FillRandom(input_data_.binary, height, width, gen, probability_dist);
+      }
+    }
+
+    std::vector<int> flat_binary(static_cast<std::size_t>(height) * static_cast<std::size_t>(width), 0);
+    if (rank == 0) {
+      for (int row = 0; row < height; ++row) {
+        for (int col = 0; col < width; ++col) {
+          flat_binary[(static_cast<std::size_t>(row) * static_cast<std::size_t>(width)) +
+                      static_cast<std::size_t>(col)] =
+              input_data_.binary[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)];
+        }
+      }
+    }
+
+    MPI_Bcast(flat_binary.data(), static_cast<int>(flat_binary.size()), MPI_INT, 0, MPI_COMM_WORLD);
+
+    for (int row = 0; row < height; ++row) {
+      for (int col = 0; col < width; ++col) {
+        input_data_.binary[static_cast<std::size_t>(row)][static_cast<std::size_t>(col)] =
+            flat_binary[(static_cast<std::size_t>(row) * static_cast<std::size_t>(width)) +
+                        static_cast<std::size_t>(col)];
+      }
     }
 
     expected_output_.labels = ComputeReferenceLabels(input_data_.binary);
