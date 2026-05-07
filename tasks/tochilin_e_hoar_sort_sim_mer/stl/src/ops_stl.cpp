@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <iterator>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -147,7 +146,7 @@ std::vector<std::size_t> TochilinEHoarSortSimMerSTL::MergePass(const std::vector
 
   for (int worker_idx = 0; worker_idx < worker_count; ++worker_idx) {
     workers.emplace_back([&, worker_idx] {
-      for (std::size_t pair_idx = static_cast<std::size_t>(worker_idx); pair_idx < merge_pairs;
+      for (auto pair_idx = static_cast<std::size_t>(worker_idx); pair_idx < merge_pairs;
            pair_idx += static_cast<std::size_t>(worker_count)) {
         const std::size_t left = current_boundaries[pair_idx * 2];
         const std::size_t mid = current_boundaries[(pair_idx * 2) + 1];
