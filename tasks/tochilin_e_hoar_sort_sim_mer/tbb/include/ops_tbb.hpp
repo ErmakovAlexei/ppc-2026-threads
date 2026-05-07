@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -24,6 +25,8 @@ class TochilinEHoarSortSimMerTBB : public BaseTask {
   static void QuickSortSequential(std::vector<int> &arr, int low, int high);
   static void QuickSortParallel(std::vector<int> &arr, int low, int high, int serial_cutoff);
   static std::pair<int, int> Partition(std::vector<int> &arr, int l, int r);
+  static bool ProcessRange(std::vector<int> &arr, std::pair<int, int> range, int serial_cutoff,
+                           std::vector<std::pair<int, int>> &next_ranges);
   static int ResolveSerialCutoff(std::size_t size);
   static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
 };

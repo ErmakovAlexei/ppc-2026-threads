@@ -1,6 +1,7 @@
 #include "tochilin_e_hoar_sort_sim_mer/tbb/include/ops_tbb.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -87,6 +88,30 @@ void TochilinEHoarSortSimMerTBB::QuickSortSequential(std::vector<int> &arr, int 
   }
 }
 
+bool TochilinEHoarSortSimMerTBB::ProcessRange(std::vector<int> &arr, std::pair<int, int> range, int serial_cutoff,
+                                              std::vector<std::pair<int, int>> &next_ranges) {
+  const auto [left, right] = range;
+  if (left >= right) {
+    return false;
+  }
+
+  const int range_size = right - left + 1;
+  if (range_size <= serial_cutoff) {
+    QuickSortSequential(arr, left, right);
+    return false;
+  }
+
+  const auto [i, j] = Partition(arr, left, right);
+  if (left < j) {
+    next_ranges.emplace_back(left, j);
+  }
+  if (i < right) {
+    next_ranges.emplace_back(i, right);
+  }
+
+  return true;
+}
+
 void TochilinEHoarSortSimMerTBB::QuickSortParallel(std::vector<int> &arr, int low, int high, int serial_cutoff) {
   if (low >= high) {
     return;
@@ -102,24 +127,7 @@ void TochilinEHoarSortSimMerTBB::QuickSortParallel(std::vector<int> &arr, int lo
                       [&](const tbb::blocked_range<std::size_t> &range) {
       auto &local_next = next_ranges_local.local();
       for (std::size_t idx = range.begin(); idx != range.end(); ++idx) {
-        const auto [left, right] = current_ranges[idx];
-        if (left >= right) {
-          continue;
-        }
-
-        const int range_size = right - left + 1;
-        if (range_size <= serial_cutoff) {
-          QuickSortSequential(arr, left, right);
-          continue;
-        }
-
-        const auto [i, j] = Partition(arr, left, right);
-        if (left < j) {
-          local_next.emplace_back(left, j);
-        }
-        if (i < right) {
-          local_next.emplace_back(i, right);
-        }
+        ProcessRange(arr, current_ranges[idx], serial_cutoff, local_next);
       }
     });
 
