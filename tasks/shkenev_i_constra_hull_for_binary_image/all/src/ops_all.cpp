@@ -8,8 +8,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <queue>
+#include <ranges>
 #include <utility>
 #include <vector>
+
+#include "shkenev_i_constra_hull_for_binary_image/common/include/common.hpp"
 
 namespace shkenev_i_constra_hull_for_binary_image {
 
@@ -93,7 +96,7 @@ bool ShkenevIConstrHullALL::PreProcessingImpl() {
   work_.convex_hulls.clear();
 
   auto &pixels = work_.pixels;
-  tbb::parallel_for(size_t(0), pixels.size(), [&](size_t idx) {
+  tbb::parallel_for(static_cast<size_t>(0), pixels.size(), [&](size_t idx) {
     pixels[idx] = IsForeground(pixels[idx]) ? static_cast<std::uint8_t>(255) : static_cast<std::uint8_t>(0);
   });
 
@@ -158,10 +161,10 @@ std::vector<Point> ShkenevIConstrHullALL::BuildHull(const std::vector<Point> &po
   }
 
   std::vector<Point> pts = points;
-  std::sort(pts.begin(), pts.end(),
-            [](const Point &a, const Point &b) { return (a.x != b.x) ? (a.x < b.x) : (a.y < b.y); });
+  std::ranges::sort(pts, [](const Point &a, const Point &b) { return (a.x != b.x) ? (a.x < b.x) : (a.y < b.y); });
 
-  pts.erase(std::unique(pts.begin(), pts.end()), pts.end());
+  auto [first, last] = std::ranges::unique(pts);
+  pts.erase(first, last);
   if (pts.size() <= 2) {
     return pts;
   }
@@ -178,11 +181,11 @@ std::vector<Point> ShkenevIConstrHullALL::BuildHull(const std::vector<Point> &po
     lower.push_back(point);
   }
 
-  for (auto it = pts.rbegin(); it != pts.rend(); ++it) {
-    while (upper.size() >= 2 && Cross(upper[upper.size() - 2], upper.back(), *it) <= 0) {
+  for (const auto &point : std::ranges::reverse_view(pts)) {
+    while (upper.size() >= 2 && Cross(upper[upper.size() - 2], upper.back(), point) <= 0) {
       upper.pop_back();
     }
-    upper.push_back(*it);
+    upper.push_back(point);
   }
 
   lower.pop_back();
@@ -202,7 +205,7 @@ bool ShkenevIConstrHullALL::RunImpl() {
     auto &hulls = work_.convex_hulls;
     hulls.resize(components.size());
 
-    tbb::parallel_for(size_t(0), components.size(), [&](size_t idx) {
+    tbb::parallel_for(static_cast<size_t>(0), components.size(), [&](size_t idx) {
       const auto &component = components[idx];
       hulls[idx] = (component.size() <= 2) ? component : BuildHull(component);
     });
