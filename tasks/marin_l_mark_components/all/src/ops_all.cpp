@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <numeric>
-#include <ranges>
 #include <vector>
 
 #include "marin_l_mark_components/common/include/common.hpp"

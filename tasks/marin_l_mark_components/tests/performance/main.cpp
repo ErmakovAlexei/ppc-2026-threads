@@ -5,6 +5,7 @@
 #include <random>
 #include <vector>
 
+#include "marin_l_mark_components/all/include/ops_all.hpp"
 #include "marin_l_mark_components/common/include/common.hpp"
 #include "marin_l_mark_components/omp/include/ops_omp.hpp"
 #include "marin_l_mark_components/seq/include/ops_seq.hpp"
@@ -85,7 +86,7 @@ namespace {
 
 const auto kAllPerfTasks =
     ppc::util::MakeAllPerfTasks<InType, MarinLMarkComponentsSEQ, MarinLMarkComponentsOMP, MarinLMarkComponentsSTL,
-                                MarinLMarkComponentsTBB>(PPC_SETTINGS_marin_l_mark_components);
+                                MarinLMarkComponentsTBB, MarinLMarkComponentsALL>(PPC_SETTINGS_marin_l_mark_components);
 
 const auto kGtestValues = ppc::util::TupleToGTestValues(kAllPerfTasks);
 
