@@ -33,6 +33,48 @@ std::vector<int> BuildDisplacements(const std::vector<int> &counts) {
   return displs;
 }
 
+std::vector<int> MergeLocalVectors(const std::vector<int> &a, const std::vector<int> &b) {
+  std::vector<int> result;
+  result.reserve(a.size() + b.size());
+  std::ranges::merge(a, b, std::back_inserter(result));
+  return result;
+}
+
+std::vector<int> MergeAcrossRanks(std::vector<int> local_data, int rank, int proc_count) {
+  for (int step = 1; step < proc_count; step *= 2) {
+    if ((rank % (step * 2)) == step) {
+      const int target_rank = rank - step;
+      const int local_size = static_cast<int>(local_data.size());
+      MPI_Send(&local_size, 1, MPI_INT, target_rank, 0, MPI_COMM_WORLD);
+      if (local_size > 0) {
+        MPI_Send(local_data.data(), local_size, MPI_INT, target_rank, 1, MPI_COMM_WORLD);
+      }
+      break;
+    }
+
+    if ((rank % (step * 2)) != 0) {
+      continue;
+    }
+
+    const int source_rank = rank + step;
+    if (source_rank >= proc_count) {
+      continue;
+    }
+
+    int remote_size = 0;
+    MPI_Recv(&remote_size, 1, MPI_INT, source_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    std::vector<int> remote_data(static_cast<std::size_t>(remote_size), 0);
+    if (remote_size > 0) {
+      MPI_Recv(remote_data.data(), remote_size, MPI_INT, source_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    local_data = MergeLocalVectors(local_data, remote_data);
+  }
+
+  return local_data;
+}
+
 }  // namespace
 
 TochilinEHoarSortSimMerALL::TochilinEHoarSortSimMerALL(const InType &in) {
@@ -116,23 +158,6 @@ std::vector<int> TochilinEHoarSortSimMerALL::MergeSortedVectors(const std::vecto
   return result;
 }
 
-std::vector<int> TochilinEHoarSortSimMerALL::MergeSortedChunks(const std::vector<int> &data,
-                                                               const std::vector<int> &counts,
-                                                               const std::vector<int> &displs) {
-  if (counts.empty()) {
-    return {};
-  }
-
-  std::vector<int> merged(data.begin(), data.begin() + counts.front());
-  for (std::size_t chunk = 1; chunk < counts.size(); ++chunk) {
-    const auto begin = data.begin() + displs[chunk];
-    const auto end = begin + counts[chunk];
-    std::vector<int> next_chunk(begin, end);
-    merged = MergeSortedVectors(merged, next_chunk);
-  }
-  return merged;
-}
-
 bool TochilinEHoarSortSimMerALL::RunImpl() {
   auto &data = GetOutput();
   if (data.empty()) {
@@ -161,18 +186,16 @@ bool TochilinEHoarSortSimMerALL::RunImpl() {
     }
   }
 
-  std::vector<int> gathered;
   if (rank == 0) {
-    gathered.resize(static_cast<std::size_t>(total_size));
-  }
-
-  MPI_Gatherv(local_data.data(), counts[static_cast<std::size_t>(rank)], MPI_INT, gathered.data(), counts.data(),
-              displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
-
-  if (rank == 0) {
-    data = MergeSortedChunks(gathered, counts, displs);
+    data.clear();
   } else {
     data.assign(static_cast<std::size_t>(total_size), 0);
+  }
+
+  local_data = MergeAcrossRanks(std::move(local_data), rank, proc_count);
+
+  if (rank == 0) {
+    data = std::move(local_data);
   }
 
   MPI_Bcast(data.data(), total_size, MPI_INT, 0, MPI_COMM_WORLD);

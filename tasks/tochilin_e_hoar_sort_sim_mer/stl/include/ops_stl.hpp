@@ -23,14 +23,12 @@ class TochilinEHoarSortSimMerSTL : public BaseTask {
   bool PostProcessingImpl() override;
 
   static void QuickSortSequential(std::vector<int> &arr, int low, int high);
+  static void QuickSortParallel(std::vector<int> &arr, int low, int high, int serial_cutoff, int worker_count);
   static std::pair<int, int> Partition(std::vector<int> &arr, int l, int r);
-  static int ResolvePartCount(std::size_t size);
-  static std::vector<std::size_t> BuildBoundaries(std::size_t size, int part_count);
-  static void SortParts(std::vector<int> &data, const std::vector<std::size_t> &boundaries);
-  static void MergeRanges(const std::vector<int> &src, std::vector<int> &dst, std::size_t left, std::size_t mid,
-                          std::size_t right);
-  static std::vector<std::size_t> MergePass(const std::vector<int> &src, std::vector<int> &dst,
-                                            const std::vector<std::size_t> &current_boundaries);
+  static bool ProcessRange(std::vector<int> &arr, std::pair<int, int> range, int serial_cutoff,
+                           std::vector<std::pair<int, int>> &next_ranges);
+  static int ResolveSerialCutoff(std::size_t size);
+  static std::vector<int> MergeSortedVectors(const std::vector<int> &a, const std::vector<int> &b);
 };
 
 }  // namespace tochilin_e_hoar_sort_sim_mer

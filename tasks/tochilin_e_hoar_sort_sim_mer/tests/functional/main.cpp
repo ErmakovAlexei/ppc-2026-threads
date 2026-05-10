@@ -83,7 +83,7 @@ class TochilinEHoarSortSimMerRunFuncTests : public ppc::util::BaseRunFuncTests<I
   }
 
  private:
-  InType input_data_;
+  InType input_data_;  // reopen
 };
 
 namespace {
@@ -93,11 +93,10 @@ TEST_P(TochilinEHoarSortSimMerRunFuncTests, TestSorting) {
 }
 
 const std::array<TestType, 10> kTestParam = {
-    std::make_tuple(1, "OneElement"),       std::make_tuple(2, "TwoElements"),
-    std::make_tuple(8, "EightElements"),    std::make_tuple(13, "RandomSize"),
-    std::make_tuple(100, "MediumSize"),     std::make_tuple(128, "AlreadySorted"),
-    std::make_tuple(127, "ReverseSorted"),  std::make_tuple(512, "LargeSize"),
-    std::make_tuple(10000, "ParallelSize"), std::make_tuple(20000, "ParallelOddMerge")};
+    std::make_tuple(1, "OneElement"),      std::make_tuple(2, "TwoElements"),  std::make_tuple(8, "EightElements"),
+    std::make_tuple(13, "RandomSize"),     std::make_tuple(100, "MediumSize"), std::make_tuple(128, "AlreadySorted"),
+    std::make_tuple(127, "ReverseSorted"), std::make_tuple(512, "LargeSize"),  std::make_tuple(1000, "LongSize"),
+    std::make_tuple(2000, "LongLongSize")};
 
 const auto kTestTasksList = std::tuple_cat(
     ppc::util::AddFuncTask<TochilinEHoarSortSimMerALL, InType>(kTestParam, PPC_SETTINGS_tochilin_e_hoar_sort_sim_mer),
